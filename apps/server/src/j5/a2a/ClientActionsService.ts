@@ -49,7 +49,6 @@ import {
   claimPendingAttachments,
 } from "../../orchestration-v2/AttachmentClaims.ts";
 import { DocumentText } from "../../provider/DocumentText.ts";
-import { PlaybookStore } from "../playbooks/PlaybookStore.ts";
 import { ArchiveCrewService } from "./ArchiveCrewService.ts";
 import { CommCommandId, ExchangeId, ParticipantId } from "./contracts.ts";
 import { projectCrewProposal } from "./crewProposalProjection.ts";
@@ -186,7 +185,6 @@ const make = Effect.gen(function* () {
   const drafts = yield* AgentPersonaDrafts;
   // A random source that fails is the host's fault, not a refusal a client can act on.
   const freshId = (yield* SecureRandom.SecureRandom).uuidV4().pipe(Effect.orDie);
-  const projectProposal = projectCrewProposal(yield* PlaybookStore);
   const claimContext = yield* Effect.context<FileSystem.FileSystem | ServerConfig | DocumentText>();
   // Only fresh uploads: an attachment id that names a thread would let an answer hand the agent
   // a file from a thread the person may not read.
@@ -210,14 +208,10 @@ const make = Effect.gen(function* () {
     resolveCrewProposal: Effect.fn("ClientActionsService.resolveCrewProposal")(
       function (input, decidedBy) {
         return proposals.resolve({ ...input, decidedBy }).pipe(
-          Effect.flatMap((result) =>
-            projectProposal(result.proposal).pipe(
-              Effect.map((proposal) => ({
-                proposal,
-                crewInstanceId: result.instance?.id ?? null,
-              })),
-            ),
-          ),
+          Effect.map((result) => ({
+            proposal: projectCrewProposal(result.proposal),
+            crewInstanceId: result.instance?.id ?? null,
+          })),
         );
       },
     ),

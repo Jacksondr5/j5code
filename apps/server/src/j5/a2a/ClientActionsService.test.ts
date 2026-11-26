@@ -14,7 +14,6 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
 import * as ServerConfig from "../../config.ts";
-import { PlaybookStore } from "../playbooks/PlaybookStore.ts";
 import { noDocumentTextLayer } from "../test-support/documentText.ts";
 import type { CrewProposal } from "./AgentCrewProposalService.ts";
 import {
@@ -55,7 +54,13 @@ const proposal: CrewProposal = {
   brief: "Fix the flaky login test.",
   displayName: "Login Fix Crew",
   requestedSeats: [
-    { workspace: { type: "shared" }, seat: "builder", agentId: "builder", reason: "Builds" },
+    {
+      workspace: { type: "shared" },
+      seat: "builder",
+      agentId: "builder",
+      reason: "Builds",
+      steps: ["plan"],
+    },
   ],
   approvedSeats: null,
   createdAt: "2026-09-09T16:00:00.000Z",
@@ -154,7 +159,11 @@ const serviceWith = (seen: ReturnType<typeof calls>) =>
           resolve: (input) =>
             input.proposalId === proposal.id
               ? Effect.succeed({
-                  proposal: { ...proposal, status: "approved" as const },
+                  proposal: {
+                    ...proposal,
+                    status: "approved" as const,
+                    approvedSeats: proposal.requestedSeats,
+                  },
                   instance: null,
                 })
               : Effect.fail(
@@ -163,16 +172,6 @@ const serviceWith = (seen: ReturnType<typeof calls>) =>
                     status: "declined",
                   }),
                 ),
-        }),
-        Layer.mock(PlaybookStore)({
-          readPath: () =>
-            Effect.succeed({
-              name: "release",
-              title: "Release",
-              description: "Ship.",
-              steps: [{ id: "plan", title: "Plan", prompt: "Plan." }],
-              warnings: [],
-            }),
         }),
         Layer.mock(A2AHumanInbox)({
           // Only these asks are still open for the person.
@@ -323,13 +322,17 @@ it.effect("resolves a proposal and answers with it as the card reads it", () => 
     });
     assert.equal(resolved.proposal.status, "approved");
     assert.isNull(resolved.crewInstanceId);
-    // The stored reference becomes the live definition's summary.
-    assert.deepStrictEqual(resolved.proposal.playbook, {
-      name: "release",
-      title: "Release",
-      steps: [{ id: "plan", title: "Plan" }],
-      issue: null,
-    });
+    assert.isNull(resolved.proposal.playbook);
+    const roster = [
+      {
+        workspace: { type: "shared" as const },
+        seat: "builder",
+        agentId: "builder",
+        reason: "Builds",
+      },
+    ];
+    assert.deepStrictEqual(resolved.proposal.requestedSeats, roster);
+    assert.deepStrictEqual(resolved.proposal.approvedSeats, roster);
     const stale = yield* actions
       .resolveCrewProposal({ proposalId: "other", decision: "decline" })
       .pipe(Effect.flip);

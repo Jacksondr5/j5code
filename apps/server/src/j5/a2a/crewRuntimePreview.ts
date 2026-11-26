@@ -7,11 +7,7 @@ import type {
   ServerProvider,
 } from "@t3tools/contracts";
 import { isAgentPersonaReasoningOptionId } from "@t3tools/contracts";
-import type {
-  CrewPersonaSwap,
-  CrewProposalPlaybook,
-  CrewProposalSeatRuntime,
-} from "@t3tools/contracts/j5";
+import type { CrewProposalSeatRuntime } from "@t3tools/contracts/j5";
 import { getProviderOptionCurrentValue } from "@t3tools/shared/model";
 import type { CrewCaptain, ResolvedCrewLaunchSeat } from "./CrewLaunchService.ts";
 import type { CrewProposal } from "./AgentCrewProposalService.ts";
@@ -119,38 +115,12 @@ export function describeCrewSeatRuntime(
 }
 
 /**
- * A stable hash of the playbook plan the card shows: the definition, each step's title and
- * persona in YAML order, the swaps per seat, and the steps nobody owns. Prompts stay out; they are
- * read live when a step is delivered.
- */
-export function crewPlaybookPlanDigest(plan: {
-  readonly definitionPath: string;
-  readonly summary: CrewProposalPlaybook;
-  readonly swapsBySeat: ReadonlyMap<string, ReadonlyArray<CrewPersonaSwap>>;
-  readonly unownedSteps: ReadonlyArray<string>;
-}): string {
-  return NodeCrypto.createHash("sha256")
-    .update(
-      JSON.stringify({
-        definitionPath: plan.definitionPath,
-        title: plan.summary.title,
-        steps: plan.summary.steps.map(({ id, title, persona }) => [id, title, persona ?? null]),
-        swaps: [...plan.swapsBySeat],
-        unownedSteps: plan.unownedSteps,
-      }),
-    )
-    .digest("hex");
-}
-
-/**
  * Content token survives restarts and binds both the human's roster and the exact launch snapshot.
- * A playbook Crew also binds its plan digest; without one the token is what it always was.
  */
 export function crewApprovalToken(
   proposal: CrewProposal,
   captain: CrewCaptain,
   seats: ReadonlyArray<ResolvedCrewLaunchSeat>,
-  playbookPlan?: string,
 ): string {
   return NodeCrypto.createHash("sha256")
     .update(
@@ -163,7 +133,6 @@ export function crewApprovalToken(
         worktreePath: captain.thread.worktreePath,
         interactionMode: captain.thread.interactionMode,
         seats,
-        ...(playbookPlan === undefined ? {} : { playbookPlan }),
       }),
     )
     .digest("hex");

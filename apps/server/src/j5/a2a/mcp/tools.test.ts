@@ -98,6 +98,7 @@ it("publishes the ratified single-target lifecycle contracts fail-closed", () =>
   assert.include(J5SpawnAgentTool.description ?? "", "set them only to pin one of those entries");
   // Exact on purpose: no tool answers the Inbox's worktree cleanup approval; only a person can.
   assert.sameMembers(Object.keys(J5Toolkit.tools), [
+    "j5_playbook_assign",
     "j5_playbook_back",
     "j5_playbook_cancel",
     "j5_playbook_complete",
@@ -274,6 +275,7 @@ it("says which of the two ways to get help each tool serves", () => {
   assert.include(J5DelegateTaskTool.description, "the first of the two ways to get help");
 });
 
-it("tells a Captain proposing a crew how a playbook shapes the roster", () => {
-  assert.include(J5_PROPOSE_CREW_DESCRIPTION, "For a crew built from a playbook");
+it("does not advertise fixed Crew playbook step ownership", () => {
+  assert.notInclude(J5_PROPOSE_CREW_DESCRIPTION, "For a crew built from a playbook");
+  assert.notInclude(J5_REQUEST_CREW_MEMBER_DESCRIPTION, "unfinished steps");
 });

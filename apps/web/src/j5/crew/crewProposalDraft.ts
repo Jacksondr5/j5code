@@ -58,15 +58,13 @@ export const saveSeat = (
   if (!current) return { seats, error: "This seat is no longer in the roster." };
   const validated = addSeat(removeSeat(seats, seatName), draft);
   if (validated.error !== null) return { seats, error: validated.error };
-  // The card cannot reassign playbook steps or whom a reviewer reviews, so an edit keeps both.
+  // The card keeps reviewer relationships while editing a seat.
   // An edit keeps the seat's own workspace, or its lack of one; only a new seat defaults.
   const { workspace: _defaulted, ...edited } = validated.seats[validated.seats.length - 1]!;
   const updated = {
     ...edited,
     ...(draft.workspace === undefined ? {} : { workspace: draft.workspace }),
     reason: current.reason,
-    ...(current.personaSwaps === undefined ? {} : { personaSwaps: current.personaSwaps }),
-    ...(current.steps === undefined ? {} : { steps: current.steps }),
     ...(current.reviews === undefined ? {} : { reviews: current.reviews }),
   };
   return {

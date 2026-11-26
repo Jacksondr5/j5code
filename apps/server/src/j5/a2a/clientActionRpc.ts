@@ -72,7 +72,6 @@ const proposalFailure = failAsJ5ActionError({
     "CrewLaunchModelNotEligibleError",
     "CrewLaunchCapError",
     "CrewLaunchSeatConflictError",
-    "CrewStepAlreadyOwnedError",
   ],
   failed: "Crew proposal operation failed.",
 });

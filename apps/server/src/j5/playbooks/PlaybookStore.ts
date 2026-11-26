@@ -41,6 +41,7 @@ export { playbookError } from "./definition.ts";
 
 import { makeAgentPersonaLibrary, personaCatalogProblem } from "../agents/agentPersonaLibrary.ts";
 import { durationMsBetween, j5AnalyticsRecorder } from "../analytics/recorder.ts";
+import { participantIdForThread } from "../a2a/HomeRegistrar.ts";
 
 const isPlaybookError = Schema.is(PlaybookError);
 // Any file stem that stays inside the playbook directory; such files are listed and deletable
@@ -94,7 +95,12 @@ const stepPersonaWarnings = (
     ];
   });
 
-export type StoredPlaybookRun = PlaybookRun & { readonly definition: PlaybookDefinition | null };
+export type StoredPlaybookRun = PlaybookRun & {
+  readonly definition: PlaybookDefinition | null;
+  readonly holderParticipantId: string | null;
+  readonly holderThreadId: ThreadId | null;
+  readonly assignedByParticipantId: string | null;
+};
 const DefinitionJson = Schema.fromJsonString(PlaybookDefinition);
 const decodeDefinition = Schema.decodeUnknownOption(DefinitionJson);
 const encodeDefinition = Schema.encodeSync(DefinitionJson);
@@ -107,6 +113,9 @@ type RunRow = {
   owner_thread_id: string;
   definition_path: string;
   current_step_id: string;
+  holder_participant_id: string | null;
+  holder_thread_id: string | null;
+  assigned_by_participant_id: string | null;
   status: PlaybookRun["status"];
   created_at: string;
   updated_at: string;
@@ -127,13 +136,16 @@ const fromRow = (row: RunRow): StoredPlaybookRun => ({
   ownerThreadId: ThreadId.make(row.owner_thread_id),
   definitionPath: row.definition_path,
   currentStepId: row.current_step_id,
+  holderParticipantId: row.holder_participant_id,
+  holderThreadId: row.holder_thread_id === null ? null : ThreadId.make(row.holder_thread_id),
+  assignedByParticipantId: row.assigned_by_participant_id,
   status: row.status,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
   ...(row.crew_instance_id === null ? {} : { crewInstanceId: row.crew_instance_id }),
 });
 
-/** One step landing of a Crew-linked run and how its hand-off resolved. */
+/** One recorded step landing and how its hand-off resolved. */
 export type PlaybookLanding = {
   readonly runId: string;
   readonly requestId: string;
@@ -142,6 +154,8 @@ export type PlaybookLanding = {
   /** Set once, at first resolution; null with a target thread means the Captain. */
   readonly targetSeat: string | null;
   readonly targetThreadId: string | null;
+  readonly targetParticipantId: string | null;
+  readonly assignedByParticipantId: string | null;
   readonly outcome: "delivered" | "captain" | "skipped" | null;
   readonly resolvedAt: string | null;
 };
@@ -152,6 +166,8 @@ type LandingRow = {
   landed_at: string;
   target_seat: string | null;
   target_thread_id: string | null;
+  target_participant_id: string | null;
+  assigned_by_participant_id: string | null;
   outcome: PlaybookLanding["outcome"];
   resolved_at: string | null;
 };
@@ -162,6 +178,8 @@ const landingFromRow = (row: LandingRow): PlaybookLanding => ({
   landedAt: row.landed_at,
   targetSeat: row.target_seat,
   targetThreadId: row.target_thread_id,
+  targetParticipantId: row.target_participant_id,
+  assignedByParticipantId: row.assigned_by_participant_id,
   outcome: row.outcome,
   resolvedAt: row.resolved_at,
 });
@@ -169,8 +187,17 @@ export type PlaybookMutation = {
   readonly runId: string;
   readonly client_request_id: string;
 } & (
-  | { readonly operation: "next" | "back" | "complete"; readonly expectedStepId: string }
-  | { readonly operation: "handoff"; readonly expectedStepId: string }
+  | {
+      readonly operation: "next" | "back";
+      readonly expectedStepId: string;
+      readonly assignee?: string | undefined;
+    }
+  | {
+      readonly operation: "assign";
+      readonly expectedStepId: string;
+      readonly assignee?: string | undefined;
+    }
+  | { readonly operation: "complete"; readonly expectedStepId: string }
   | ({ readonly operation: "revise" } & PlaybookReviseRequest)
   | { readonly operation: "cancel" }
 );
@@ -336,10 +363,103 @@ export const makePlaybookStore = Effect.gen(function* () {
   const remember = (owner: ThreadId, key: string, request: string, runId: string) =>
     sql`INSERT INTO j5_playbook_request (owner_thread_id, request_id, request_json, run_id)
       VALUES (${owner}, ${key}, ${request}, ${runId})`;
-  // Keyed by the request that caused the landing; a retried request is replayed before this runs.
-  const land = (runId: string, requestId: string, stepId: string, landedAt: string) =>
-    sql`INSERT INTO j5_playbook_step_delivery (run_id, request_id, step_id, landed_at)
-      VALUES (${runId}, ${requestId}, ${stepId}, ${landedAt})`;
+  type Holder = {
+    participantId: string;
+    threadId: ThreadId;
+    assignedBy: string;
+    seat: string | null;
+  };
+  const resolveHolder = Effect.fn("PlaybookStore.resolveHolder")(function* (
+    owner: ThreadId,
+    assignee?: string,
+  ) {
+    const ownerRows = yield* sql<{
+      project_id: string;
+      participant_id: string;
+    }>`SELECT project_id, participant_id FROM j5_a2a_membership
+      WHERE thread_id = ${owner} AND archived_at IS NULL`;
+    const ownerRow = ownerRows.length === 1 ? ownerRows[0] : undefined;
+    const assignedBy = ownerRow?.participant_id ?? participantIdForThread(owner);
+    if (assignee === undefined)
+      return { participantId: assignedBy, threadId: owner, assignedBy, seat: null };
+    if (!ownerRow)
+      return yield* playbookError(
+        "invalid_assignee",
+        "The owner has no active participant identity for a hand-off.",
+      );
+    const targets = yield* sql<{
+      project_id: string;
+      participant_id: string;
+      thread_id: string;
+      archived_at: string | null;
+    }>`SELECT project_id, participant_id, thread_id, archived_at FROM j5_a2a_membership
+      WHERE participant_id = ${assignee}`;
+    if (
+      targets.length !== 1 ||
+      targets[0]!.project_id !== ownerRow.project_id ||
+      targets[0]!.archived_at !== null
+    )
+      return yield* playbookError(
+        "invalid_assignee",
+        `Participant ${assignee} is not an active local agent in the owner's project.`,
+      );
+    const target = targets[0]!;
+    if (target.thread_id === owner)
+      return yield* playbookError(
+        "invalid_assignee",
+        "Omit assignee to keep the step with its owner.",
+      );
+    const threads = yield* sql<{
+      thread_id: string;
+    }>`SELECT thread_id FROM orchestration_v2_projection_threads
+      WHERE thread_id = ${target.thread_id} AND archived_at IS NULL AND deleted_at IS NULL`;
+    if (threads.length !== 1)
+      return yield* playbookError(
+        "invalid_assignee",
+        `Participant ${assignee}'s thread is archived, deleted, or unavailable.`,
+      );
+    const crew = yield* sql<{
+      seat_name: string;
+    }>`SELECT member.seat_name FROM j5_agent_crew_member member
+      JOIN j5_agent_crew_instance instance ON instance.id = member.crew_instance_id
+      WHERE member.participant_id = ${assignee} AND instance.captain_thread_id = ${owner}
+        AND instance.archived_at IS NULL LIMIT 1`;
+    if (crew[0])
+      return {
+        participantId: assignee,
+        threadId: ThreadId.make(target.thread_id),
+        assignedBy,
+        seat: crew[0].seat_name,
+      };
+    const spawned = yield* sql<{
+      participant_id: string;
+    }>`SELECT participant_id FROM j5_a2a_participant_placement
+      WHERE project_id = ${ownerRow.project_id} AND participant_id = ${assignee}
+        AND provenance_kind = 'spawned-by' AND provenance_participant_id = ${assignedBy}
+      LIMIT 1`;
+    if (!spawned[0])
+      return yield* playbookError(
+        "invalid_assignee",
+        `Participant ${assignee} was not spawned by this owner and is not a member of a Crew it captains.`,
+      );
+    return {
+      participantId: assignee,
+      threadId: ThreadId.make(target.thread_id),
+      assignedBy,
+      seat: null,
+    };
+  });
+  // Target and attribution are committed with the run pointer, so a retry cannot change holders.
+  const land = (
+    runId: string,
+    requestId: string,
+    stepId: string,
+    landedAt: string,
+    holder: Holder,
+  ) =>
+    sql`INSERT INTO j5_playbook_step_delivery (run_id, request_id, step_id, landed_at,
+      target_seat, target_thread_id, target_participant_id, assigned_by_participant_id)
+      VALUES (${runId}, ${requestId}, ${stepId}, ${landedAt}, ${holder.seat}, ${holder.threadId}, ${holder.participantId}, ${holder.assignedBy})`;
   const skipPending = (runId: string, resolvedAt: string) =>
     sql`UPDATE j5_playbook_step_delivery SET outcome = 'skipped', resolved_at = ${resolvedAt}
       WHERE run_id = ${runId} AND resolved_at IS NULL`;
@@ -437,7 +557,6 @@ export const makePlaybookStore = Effect.gen(function* () {
     workspaceRoot: string,
     name: string,
     key: string,
-    crewInstanceId?: string,
   ) {
     const rows = yield* sql<{
       request_json: string;
@@ -448,16 +567,19 @@ export const makePlaybookStore = Effect.gen(function* () {
       if (
         request[0] !== "start" ||
         !recordedPath ||
-        path.basename(recordedPath, ".yaml") !== name.replace(/\.yaml$/, "") ||
-        (request[2] ?? null) !== (crewInstanceId ?? null)
+        path.basename(recordedPath, ".yaml") !== name.replace(/\.yaml$/, "")
       )
         return yield* playbookError(
           "request_conflict",
           "This client_request_id belongs to a different operation. Use a new key for a new operation.",
         );
-      return { definitionPath: recordedPath };
+      // Before runtime assignees, starts could include the originating Crew ID.
+      // Preserve that legacy shape only for retries of the original unassigned start.
+      const legacyRequest =
+        request.length === 3 && typeof request[2] === "string" ? rows[0].request_json : undefined;
+      return { definitionPath: recordedPath, legacyRequest };
     }
-    return yield* definitionPathFor(workspaceRoot, name);
+    return { ...(yield* definitionPathFor(workspaceRoot, name)), legacyRequest: undefined };
   }, Effect.mapError(storageError));
 
   /** Reads a live definition without touching run state: no permit, no SQL, no revision bump. */
@@ -569,22 +691,18 @@ export const makePlaybookStore = Effect.gen(function* () {
     workspaceRoot: string,
     name: string,
     key: string,
-    options: { readonly crewInstanceId?: string } = {},
+    assignee?: string,
   ) {
-    const { definitionPath } = yield* startDefinitionPathFor(
+    const { definitionPath, legacyRequest } = yield* startDefinitionPathFor(
       owner,
       workspaceRoot,
       name,
       key,
-      options.crewInstanceId,
     );
-    const crewInstanceId = options.crewInstanceId ?? null;
-    // A thread run keeps the original request shape, so receipts stored before Crew links replay.
-    const request = encodeRequest(
-      crewInstanceId === null
-        ? ["start", definitionPath]
-        : ["start", definitionPath, crewInstanceId],
-    );
+    const request =
+      assignee === undefined
+        ? (legacyRequest ?? encodeRequest(["start", definitionPath]))
+        : encodeRequest(["start", definitionPath, null, assignee]);
     return yield* Effect.gen(function* () {
       yield* cancelOrphans();
       const previous = yield* replay(owner, key, request);
@@ -605,6 +723,7 @@ export const makePlaybookStore = Effect.gen(function* () {
             );
           if (source._tag === "Failure") return yield* source.failure;
           const { definition } = yield* parseDefinitionText(source.success);
+          const holder = yield* resolveHolder(owner, assignee);
           const timestamp = yield* now;
           const run: StoredPlaybookRun = {
             definition,
@@ -615,14 +734,18 @@ export const makePlaybookStore = Effect.gen(function* () {
             ownerThreadId: owner,
             definitionPath,
             currentStepId: definition.steps[0]!.id,
+            holderParticipantId: holder.participantId,
+            holderThreadId: holder.threadId,
+            assignedByParticipantId: holder.assignedBy,
             status: "active",
             createdAt: timestamp,
             updatedAt: timestamp,
-            ...(crewInstanceId === null ? {} : { crewInstanceId }),
           };
-          yield* sql`INSERT INTO j5_playbook_run (run_id, owner_thread_id, definition_path, current_step_id, status, created_at, updated_at, crew_instance_id, definition_json)
-          VALUES (${run.runId}, ${owner}, ${definitionPath}, ${run.currentStepId}, ${run.status}, ${timestamp}, ${timestamp}, ${crewInstanceId}, ${encodeDefinition(definition)})`;
-          if (crewInstanceId !== null) yield* land(run.runId, key, run.currentStepId, timestamp);
+          yield* sql`INSERT INTO j5_playbook_run (run_id, owner_thread_id, definition_path, current_step_id, status, created_at, updated_at, definition_json,
+            holder_participant_id, holder_thread_id, assigned_by_participant_id)
+          VALUES (${run.runId}, ${owner}, ${definitionPath}, ${run.currentStepId}, ${run.status}, ${timestamp}, ${timestamp}, ${encodeDefinition(definition)},
+            ${holder.participantId}, ${holder.threadId}, ${holder.assignedBy})`;
+          yield* land(run.runId, key, run.currentStepId, timestamp, holder);
           yield* remember(owner, key, request, run.runId);
           return { run, replayed: false };
         }),
@@ -632,7 +755,7 @@ export const makePlaybookStore = Effect.gen(function* () {
       yield* recordAnalytics("j5.playbook.run.started", {
         stepCount: definition.steps.length,
         stepsWithPersona: definition.steps.filter((step) => step.persona !== undefined).length,
-        crewBound: crewInstanceId !== null,
+        crewBound: false,
       });
       return present(result.run, definition);
     }).pipe(Effect.tap(notifyChange), permit.withPermits(1));
@@ -665,7 +788,7 @@ export const makePlaybookStore = Effect.gen(function* () {
     owner: ThreadId,
     input: PlaybookMutation,
   ) {
-    const request = encodeRequest([
+    const baseRequest = [
       input.operation,
       input.runId,
       "expectedStepId" in input ? input.expectedStepId : null,
@@ -685,7 +808,12 @@ export const makePlaybookStore = Effect.gen(function* () {
             ),
           ]
         : []),
-    ]);
+    ];
+    const request = encodeRequest(
+      "assignee" in input && input.assignee !== undefined
+        ? [...baseRequest, input.assignee]
+        : baseRequest,
+    );
     return yield* Effect.gen(function* () {
       yield* cancelOrphans();
       const previous = yield* replay(owner, input.client_request_id, request);
@@ -746,7 +874,7 @@ export const makePlaybookStore = Effect.gen(function* () {
             if (index < 0)
               return yield* playbookError("invalid_snapshot", "The run has no current step.");
             if (input.operation === "complete") status = "completed";
-            else if (input.operation !== "handoff") {
+            else if (input.operation !== "assign") {
               const target = ids[index + (input.operation === "next" ? 1 : -1)];
               if (!target)
                 return yield* playbookError(
@@ -759,6 +887,22 @@ export const makePlaybookStore = Effect.gen(function* () {
               currentStepId = target;
             }
           }
+          if (
+            input.operation === "revise" &&
+            currentStepId === run.currentStepId &&
+            input.assignee !== undefined
+          )
+            return yield* playbookError(
+              "invalid_assignee",
+              "A revision that keeps the current step cannot change its holder. Use j5_playbook_assign.",
+            );
+          const holder =
+            input.operation === "next" ||
+            input.operation === "back" ||
+            input.operation === "assign" ||
+            (input.operation === "revise" && currentStepId !== run.currentStepId)
+              ? yield* resolveHolder(owner, input.assignee)
+              : null;
           const updatedAt = yield* now;
           let revisionCount = run.revisionCount ?? 0;
           let latestRevision = run.latestRevision ?? null;
@@ -771,22 +915,33 @@ export const makePlaybookStore = Effect.gen(function* () {
               toStepId: currentStepId,
               stepsDigest: playbookDigest(encodeJson(definition!.steps)),
             };
+            if (currentStepId === run.currentStepId && run.holderThreadId !== owner) {
+              const previousStep = run.definition?.steps.find((step) => step.id === currentStepId);
+              const revisedStep = definition!.steps.find((step) => step.id === currentStepId);
+              if (previousStep?.prompt !== revisedStep?.prompt) {
+                // Preserve the recipient and seat recorded for this step.
+                yield* sql`INSERT INTO j5_playbook_step_delivery (run_id, request_id, step_id, landed_at,
+                  target_seat, target_thread_id, target_participant_id, assigned_by_participant_id)
+                  SELECT run_id, ${input.client_request_id}, step_id, ${updatedAt},
+                    target_seat, target_thread_id, target_participant_id, assigned_by_participant_id
+                  FROM j5_playbook_step_delivery WHERE run_id = ${run.runId} AND step_id = ${currentStepId}
+                  ORDER BY landed_at DESC, rowid DESC LIMIT 1`;
+              }
+            }
             revisionCount += 1;
             yield* sql`INSERT INTO j5_playbook_revision (run_id, request_id, basis, revised_at, owner_thread_id, from_step_id, to_step_id, steps_digest)
               VALUES (${run.runId}, ${input.client_request_id}, ${input.basis}, ${updatedAt}, ${owner}, ${run.currentStepId}, ${currentStepId}, ${latestRevision.stepsDigest})`;
             yield* sql`UPDATE j5_playbook_run SET definition_json = ${encodeDefinition(definition!)}, revision_count = ${revisionCount}, latest_revision_json = ${encodeRevision(latestRevision)} WHERE run_id = ${run.runId}`;
           }
-          yield* sql`UPDATE j5_playbook_run SET current_step_id = ${currentStepId}, status = ${status}, updated_at = ${updatedAt}
+          yield* sql`UPDATE j5_playbook_run SET current_step_id = ${currentStepId}, status = ${status}, updated_at = ${updatedAt},
+            holder_participant_id = ${holder?.participantId ?? run.holderParticipantId},
+            holder_thread_id = ${holder?.threadId ?? run.holderThreadId},
+            assigned_by_participant_id = ${holder?.assignedBy ?? run.assignedByParticipantId}
           WHERE run_id = ${run.runId} AND owner_thread_id = ${owner}`;
-          if (run.crewInstanceId !== undefined && run.crewInstanceId !== null) {
-            // Every landing is handed to its owner exactly once; a finished run hands off nothing.
-            if (
-              status === "active" &&
-              (input.operation !== "revise" || currentStepId !== run.currentStepId)
-            )
-              yield* land(run.runId, input.client_request_id, currentStepId, updatedAt);
-            else if (status !== "active") yield* skipPending(run.runId, updatedAt);
-          }
+          if (input.operation === "assign" || status !== "active")
+            yield* skipPending(run.runId, updatedAt);
+          if (holder !== null)
+            yield* land(run.runId, input.client_request_id, currentStepId, updatedAt, holder);
           yield* remember(owner, input.client_request_id, request, run.runId);
           return {
             run: {
@@ -797,6 +952,9 @@ export const makePlaybookStore = Effect.gen(function* () {
               updatedAt,
               revisionCount,
               latestRevision,
+              holderParticipantId: holder?.participantId ?? run.holderParticipantId,
+              holderThreadId: holder?.threadId ?? run.holderThreadId,
+              assignedByParticipantId: holder?.assignedBy ?? run.assignedByParticipantId,
             },
             replayed: false,
           };
@@ -892,20 +1050,6 @@ export const makePlaybookStore = Effect.gen(function* () {
       ORDER BY landed_at, rowid`;
     return rows.map(landingFromRow);
   }, Effect.mapError(storageError));
-  /** Persists a landing's target once; a later call keeps the first target. */
-  const targetLanding = Effect.fn("PlaybookStore.targetLanding")(function* (
-    runId: string,
-    requestId: string,
-    target: { readonly seat: string | null; readonly threadId: string },
-  ) {
-    const targeted = yield* sql`UPDATE j5_playbook_step_delivery
-      SET target_seat = ${target.seat}, target_thread_id = ${target.threadId}
-      WHERE run_id = ${runId} AND request_id = ${requestId} AND target_thread_id IS NULL
-      RETURNING run_id`;
-    // Fleet shows the seat a pending hand-off is headed to.
-    if (targeted.length > 0) yield* bumpRevision;
-    return (yield* landing(runId, requestId))!;
-  }, Effect.mapError(storageError));
   const resolveLanding = Effect.fn("PlaybookStore.resolveLanding")(function* (
     runId: string,
     requestId: string,
@@ -947,13 +1091,43 @@ export const makePlaybookStore = Effect.gen(function* () {
         permit.withPermits(1),
       );
   }, Effect.mapError(storageError));
-  /** A Crew's active run with its saved progress, or null. */
-  const activeRunForCrew = Effect.fn("PlaybookStore.activeRunForCrew")(function* (
-    crewInstanceId: string,
+  const activeRunSummaries = Effect.fn("PlaybookStore.activeRunSummaries")(function* (
+    ownerThreadIds: ReadonlyArray<ThreadId>,
   ) {
-    const rows = yield* sql<RunRow>`SELECT * FROM j5_playbook_run
-      WHERE crew_instance_id = ${crewInstanceId} AND status = 'active' LIMIT 1`;
-    return rows[0] ? yield* view(fromRow(rows[0])) : null;
+    if (ownerThreadIds.length === 0) return [];
+    const rows = yield* sql<
+      RunRow & {
+        delivery_outcome: PlaybookLanding["outcome"];
+        delivery_resolved_at: string | null;
+      }
+    >`SELECT run.*, delivery.outcome AS delivery_outcome,
+      delivery.resolved_at AS delivery_resolved_at
+      FROM j5_playbook_run run
+      LEFT JOIN j5_playbook_step_delivery delivery ON delivery.rowid = (
+        SELECT landing.rowid FROM j5_playbook_step_delivery landing
+        WHERE landing.run_id = run.run_id AND landing.step_id = run.current_step_id
+        ORDER BY landing.landed_at DESC, landing.rowid DESC LIMIT 1
+      )
+      WHERE run.status = 'active' AND run.owner_thread_id IN ${sql.in([...ownerThreadIds])}`;
+    return rows.map((row) => {
+      const run = fromRow(row);
+      const progress = present(run, run.definition);
+      return {
+        ownerThreadId: run.ownerThreadId,
+        runId: run.runId,
+        position: progress.position ?? 0,
+        total: progress.total,
+        stepId: run.currentStepId,
+        stepTitle: progress.currentStep?.title ?? run.currentStepId,
+        holderParticipantId: run.holderParticipantId,
+        state:
+          run.holderThreadId === run.ownerThreadId
+            ? ("captain" as const)
+            : row.delivery_outcome === "delivered"
+              ? ("delivered" as const)
+              : ("pending" as const),
+      };
+    });
   }, Effect.mapError(storageError));
   return {
     // Include the current revision so subscribing after a mutation still refreshes the view.
@@ -986,10 +1160,9 @@ export const makePlaybookStore = Effect.gen(function* () {
     landing,
     latestLanding,
     pendingLandings,
-    targetLanding,
     resolveLanding,
     cancelForCrew,
-    activeRunForCrew,
+    activeRunSummaries,
   };
 });
 

@@ -43,7 +43,8 @@ import {
   AgentCrewInstanceService,
   layer as crewInstanceLayer,
 } from "../a2a/AgentCrewInstanceService.ts";
-import { participantIdForThread } from "../a2a/HomeRegistrar.ts";
+import { A2AHomeRegistrar, participantIdForThread } from "../a2a/HomeRegistrar.ts";
+import { CommCommandId } from "../a2a/contracts.ts";
 import { A2ALedger, layer as ledgerLayer } from "../a2a/LedgerService.ts";
 import { runJ5A2AMigrations } from "../a2a/Migrations.ts";
 import { J5ThreadRegistrationLayer } from "../a2a/runtimeLayer.ts";
@@ -202,6 +203,14 @@ it.layer(TestLayer)("Crew playbook hand-off through the real orchestrator", (it)
           worktreePath: null,
         });
       yield* (yield* A2ALedger).ensureProject({ projectId: ledgerProjectId, createdAt: now });
+      const homes = yield* A2AHomeRegistrar;
+      for (const threadId of [captainThread, seatThread])
+        yield* homes.registerAtCreation({
+          projectId: ledgerProjectId,
+          threadId,
+          createdAt: now,
+          commandId: CommCommandId.make(`home:playbook-relay:${threadId}`),
+        });
       yield* crews.record({
         id: "crew:playbook-relay",
         projectId: ledgerProjectId,
@@ -251,13 +260,14 @@ it.layer(TestLayer)("Crew playbook hand-off through the real orchestrator", (it)
         root,
         name: "review",
         key: "start-1",
-        crewInstanceId: "crew:playbook-relay",
+        assignee: participantIdForThread(seatThread),
       });
       yield* worker.drain();
       assert.deepStrictEqual(started.delivery, {
         state: "pending",
         seat: "reviewer",
         threadId: seatThread,
+        participantId: participantIdForThread(seatThread),
       });
       assert.lengthOf(yield* seatNotices, 1);
       assert.isNull((yield* real.landing(started.runId, "start-1"))?.resolvedAt);

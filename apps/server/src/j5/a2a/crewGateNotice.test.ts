@@ -129,7 +129,7 @@ describe("crew launch report", () => {
     ],
   } as unknown as AgentCrewInstance;
 
-  it("names the playbook before the roster and tells the Captain how to start it", () => {
+  it("keeps a legacy Crew playbook label without claiming fixed runtime ownership", () => {
     const text = crewLaunchReportText({
       proposal,
       instance,
@@ -138,10 +138,7 @@ describe("crew launch report", () => {
       playbook: { name: "review", title: "Review <a> change" },
     });
     assert.include(text, "playbook: review | Review &#60;a&#62; change\nroster:\n");
-    assert.include(
-      text,
-      `Start it with j5_playbook_start(name: "review", client_request_id, crew_instance_id: "${instance.id}").`,
-    );
+    assert.notInclude(text, "j5_playbook_start");
     const plain = crewLaunchReportText({
       proposal,
       instance,

@@ -311,7 +311,6 @@ export const layer: Layer.Layer<
     const drafts = yield* AgentPersonaDrafts;
     const sql = yield* SqlClient.SqlClient;
     const proposals = yield* AgentCrewProposalService;
-    const projectProposal = projectCrewProposal(yield* PlaybookStore);
     const runtimeRequests = yield* CrewRuntimeRequestService;
 
     const participantIdentities: ClientReadsShape["participantIdentities"] = Effect.fn(
@@ -423,7 +422,7 @@ export const layer: Layer.Layer<
       }),
       crewProposals: proposals.listOpen().pipe(
         Effect.map((items) => items.filter((proposal) => proposal.approvalMode !== "automatic")),
-        Effect.flatMap((open) => Effect.forEach(open, projectProposal)),
+        Effect.map((open) => open.map(projectCrewProposal)),
         Effect.map((listed) => ({ proposals: listed })),
       ),
       crewRuntimeRequests: Effect.all({

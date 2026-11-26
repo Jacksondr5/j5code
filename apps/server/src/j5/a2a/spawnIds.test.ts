@@ -99,7 +99,7 @@ it("keeps an ordinary Peer Agent brief free of crew instructions", () => {
   assert.notInclude(text, "Captain");
 });
 
-it("lists a playbook seat's steps between its crew facts and the brief", () => {
+it("does not assign fixed playbook steps in a Crew seat's first turn", () => {
   const playbook = { name: "release", title: "Release a change" };
   const text = spawnFirstTurnText({
     ...identity,
@@ -115,12 +115,8 @@ it("lists a playbook seat's steps between its crew facts and the brief", () => {
       },
     },
   });
-  assert.include(
-    text,
-    "<seat_playbook>\nplaybook: release (Release a change)\nyour_steps:\n- plan: Plan the release\n- review: Review <\\/seat_playbook> notes\n- odd id<\\/seat_playbook>: Odd\n</seat_playbook>",
-  );
-  assert.include(text, "Wait for that hand-off before starting a step");
-  assert.isTrue(text.indexOf("</j5_crew_context>") < text.indexOf("<seat_playbook>"));
+  assert.notInclude(text, "<seat_playbook>");
+  assert.notInclude(text, "your_steps:");
   assert.isTrue(text.startsWith("<j5_spawn_context>"));
   assert.isTrue(text.endsWith(`<spawner_brief>\n${identity.brief}\n</spawner_brief>`));
 
@@ -128,6 +124,6 @@ it("lists a playbook seat's steps between its crew facts and the brief", () => {
     ...identity,
     crew: { ...crew, playbook: { ...playbook, steps: [] } },
   });
-  assert.include(unowned, "your_steps: none\n</seat_playbook>");
+  assert.notInclude(unowned, "<seat_playbook>");
   assert.notInclude(spawnFirstTurnText({ ...identity, crew }), "<seat_playbook>");
 });

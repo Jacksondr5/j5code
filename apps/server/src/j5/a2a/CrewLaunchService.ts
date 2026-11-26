@@ -51,9 +51,7 @@ import {
 } from "../agents/agentPersonaProviderPolicy.ts";
 import {
   AgentCrewInstanceService,
-  CrewStepAlreadyOwnedError,
   replacementProblem,
-  stepOwnershipConflict,
   type AgentCrewInstance,
 } from "./AgentCrewInstanceService.ts";
 import { j5AnalyticsRecorder } from "../analytics/recorder.ts";
@@ -99,25 +97,12 @@ export interface CrewLaunchSeat {
   readonly personaInstructions?: string | undefined;
   readonly modelSelection?: ModelSelection | undefined;
   readonly runtimeMode?: RuntimeMode | undefined;
-  /** Ids of the playbook steps the seat owns; recorded on its member row. */
-  readonly steps?: ReadonlyArray<string> | undefined;
   /** For an independent reviewer: the seats or members it reviews; default every non-reviewer. */
   readonly reviews?: ReadonlyArray<string> | undefined;
   /** Where the seat works, chosen for every seat. */
   readonly workspace: SpawnWorkspaceChoice;
   /** A granted escalation the Captain retries this persona seat with; only an agent's pick reads it. */
   readonly allowOnce?: string | undefined;
-}
-
-/**
- * The playbook a Crew follows as its seats are briefed: its identity for the record, and the live
- * step titles each seat's first turn lists.
- */
-export interface CrewLaunchPlaybook {
-  readonly name: string;
-  readonly definitionPath: string;
-  readonly title: string;
-  readonly steps: ReadonlyArray<{ readonly id: string; readonly title: string }>;
 }
 
 /**
@@ -155,7 +140,6 @@ export interface CrewLaunchInput {
   /** Who chose the seats: the person, on a card they approved, or an agent. */
   readonly pick: CrewSeatPick;
   readonly brief: string;
-  readonly playbook?: CrewLaunchPlaybook | null | undefined;
   /**
    * Runs once the Crew is recorded and before any seat spawns, so the caller can bind its own
    * record (the proposal) to the instance and resolve it. A failure here aborts the launch with
@@ -177,8 +161,6 @@ export interface CrewAddSeatsInput {
   readonly pick: CrewSeatPick;
   /** The brief the new seats start on; defaults to the Crew's original brief. */
   readonly brief?: string | undefined;
-  /** The Crew's playbook with live titles, for the new seats' briefs. */
-  readonly playbook?: CrewLaunchPlaybook | null | undefined;
   /**
    * Runs once the seats are reserved and before any spawns, like `onRecorded` on a launch. A
    * failure releases the reservation, so the request can be approved again.
@@ -195,16 +177,6 @@ export interface CrewAddSeatsInput {
 
 export interface CrewSeatReplacement {
   readonly seatName: string;
-  /**
-   * The replaced seat's steps that move: the run's current step and every later one it owns.
-   * Read under the Crew's lock, where no step call can move the run; a failure refuses the seat.
-   */
-  readonly unfinishedSteps: (
-    crew: AgentCrewInstance,
-  ) => Effect.Effect<
-    ReadonlyArray<string>,
-    CrewLaunchSeatUnavailableError | CrewLaunchOperationError
-  >;
 }
 
 /** The line a replacement's first turn carries about the seat it takes over. */
@@ -304,17 +276,7 @@ export type CrewLaunchError =
   | CrewLaunchModelNotEligibleError
   | CrewLaunchCapError
   | CrewLaunchSeatConflictError
-  | CrewLaunchOperationError
-  // Passed through every wrapper so the gate can refuse the approval with its own words.
-  | CrewStepAlreadyOwnedError;
-
-/** Wraps a store failure for the launch, except a step-ownership refusal, which stays typed. */
-const isCrewStepAlreadyOwnedError = Schema.is(CrewStepAlreadyOwnedError);
-
-const unlessStepOwned =
-  (wrap: (cause: unknown) => CrewLaunchOperationError) =>
-  <E>(cause: E): CrewLaunchOperationError | CrewStepAlreadyOwnedError =>
-    isCrewStepAlreadyOwnedError(cause) ? cause : wrap(cause);
+  | CrewLaunchOperationError;
 
 /**
  * Who chose the roster: the person, on a card they approved (edited or not), or an agent, on an
@@ -1015,7 +977,6 @@ export const layer = Layer.effect(
       instance: AgentCrewInstance,
       planned: ReadonlyArray<Planned>,
       brief: string,
-      playbook: CrewLaunchPlaybook | null,
     ) {
       const roster = instance.members.map((member) => ({
         seat: member.seatName,
@@ -1041,14 +1002,6 @@ export const layer = Layer.effect(
             seatInstructions: member.seat.instructions,
             captainParticipantId: captain.participantId,
             roster,
-            playbook:
-              playbook === null
-                ? undefined
-                : {
-                    name: playbook.name,
-                    title: playbook.title,
-                    steps: playbook.steps.filter((step) => member.seat.steps?.includes(step.id)),
-                  },
           },
         });
         const workspaceJson = yield* encodeWorkspace(member.workspace);
@@ -1069,12 +1022,11 @@ export const layer = Layer.effect(
       instance: AgentCrewInstance,
       planned: ReadonlyArray<Planned>,
       brief: string,
-      playbook: CrewLaunchPlaybook | null,
       addition: boolean,
       /** False when nothing was reserved, so there is no row to drop for a seat never created. */
       reserved = true,
     ) {
-      yield* prepareBriefs(captain, instance, planned, brief, playbook).pipe(
+      yield* prepareBriefs(captain, instance, planned, brief).pipe(
         Effect.mapError(
           (cause) =>
             new CrewLaunchOperationError({
@@ -1111,7 +1063,7 @@ export const layer = Layer.effect(
         worktreeSeats: planned.filter((member) => member.workspace.type === "worktree").length,
         fullAccessSeats: planned.filter((member) => member.runtimeMode === "full-access").length,
         models: new Set(planned.map((member) => member.modelSelection.model)).size,
-        hasPlaybook: playbook !== null,
+        hasPlaybook: false,
         created: outcomes("created"),
         notCreated: outcomes("not_created"),
         notStarted: outcomes("not_started"),
@@ -1164,29 +1116,17 @@ export const layer = Layer.effect(
             displayName: input.displayName,
             brief: input.brief,
             createdAt: DateTime.formatIso(yield* DateTime.now),
-            playbook:
-              input.playbook == null
-                ? null
-                : { name: input.playbook.name, definitionPath: input.playbook.definitionPath },
             members: planned.map((member) => ({
               seatName: member.seat.name,
               agentId: member.seat.agentId,
               participantId: member.participantId,
               threadId: member.threadId,
               reason: member.seat.reason,
-              playbookStepIds: member.seat.steps,
             })),
           })
-          .pipe(Effect.mapError(unlessStepOwned(recordError("recording the crew"))));
+          .pipe(Effect.mapError(recordError("recording the crew")));
         if (input.onRecorded !== undefined) yield* input.onRecorded(instance);
-        return yield* spawnAndBrief(
-          input.captain,
-          instance,
-          planned,
-          input.brief,
-          input.playbook ?? null,
-          false,
-        );
+        return yield* spawnAndBrief(input.captain, instance, planned, input.brief, false);
       },
       (launch, input) =>
         // One unit step from the record through creation, so a unit archive waits for every
@@ -1230,25 +1170,14 @@ export const layer = Layer.effect(
       const problem = replacementProblem(current, replacement.seatName, requested.seat.name);
       if (problem !== null) return yield* refused(problem);
       const old = current.members.find(({ seatName }) => seatName === replacement.seatName)!;
-      const movedStepIds = yield* replacement.unfinishedSteps(current);
-      // Its brief and its row list the steps it takes over beside any it claimed itself.
-      const steps = [...new Set([...(requested.seat.steps ?? []), ...movedStepIds])];
-      const member = { ...requested, seat: { ...requested.seat, steps } };
+      const member = requested;
       const newMember = {
         seatName: member.seat.name,
         agentId: member.seat.agentId,
         participantId: member.participantId,
         threadId: member.threadId,
         reason: member.seat.reason,
-        playbookStepIds: steps,
       };
-      // A step another addition claimed since the request was checked refuses it before it spawns.
-      const owned = stepOwnershipConflict(
-        current.id,
-        current.members.filter(({ seatName }) => seatName !== old.seatName),
-        [newMember],
-      );
-      if (owned !== null) return yield* owned;
       const oldThread = yield* getThreadRecordsIfPresent(threadManagement, old.threadId, []).pipe(
         Effect.orElseSucceed(() => null),
       );
@@ -1271,7 +1200,6 @@ export const layer = Layer.effect(
           model: oldThread?.thread.modelSelection.model ?? null,
           threadId: old.threadId,
         })}`,
-        input.playbook ?? null,
         true,
         false,
       );
@@ -1307,10 +1235,9 @@ export const layer = Layer.effect(
           seatName: old.seatName,
           participantId: old.participantId,
           member: newMember,
-          movedStepIds,
           replacedAt: DateTime.formatIso(yield* DateTime.now),
         })
-        .pipe(Effect.mapError(unlessStepOwned(failed("swapping in the replacement"))));
+        .pipe(Effect.mapError(failed("swapping in the replacement")));
       if (swapped.status !== "replaced")
         return yield* failed("swapping in the replacement")(
           swapped.status === "missing" ? `crew ${current.id} no longer exists` : swapped.detail,
@@ -1339,21 +1266,18 @@ export const layer = Layer.effect(
               participantId: member.participantId,
               threadId: member.threadId,
               reason: member.seat.reason,
-              playbookStepIds: member.seat.steps,
             })),
             { maxSeats: CREW_SEAT_CAP },
           )
           .pipe(
             Effect.mapError(
-              unlessStepOwned(
-                (cause) =>
-                  new CrewLaunchOperationError({
-                    phase: "reserving the added seats",
-                    seatName: null,
-                    createdSeats: [],
-                    cause,
-                  }),
-              ),
+              (cause) =>
+                new CrewLaunchOperationError({
+                  phase: "reserving the added seats",
+                  seatName: null,
+                  createdSeats: [],
+                  cause,
+                }),
             ),
           );
         if (reservation.status === "missing" || reservation.instance === null)
@@ -1400,7 +1324,6 @@ export const layer = Layer.effect(
           reserved,
           planned,
           input.brief ?? reserved.brief,
-          input.playbook ?? null,
           true,
         );
       },
