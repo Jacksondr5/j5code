@@ -40,6 +40,11 @@ const decodeRequestCrewMember = Schema.decodeUnknownSync(J5RequestCrewMemberInpu
 const decodeSpawnAgent = Schema.decodeUnknownSync(J5SpawnAgentInput);
 
 it.effect.each([
+  {
+    name: "j5_playbook_cancel",
+    description: J5Toolkit.tools.j5_playbook_cancel.description ?? "",
+    tool: J5Toolkit.tools.j5_playbook_cancel,
+  },
   { name: "j5_spawn_agent", description: J5_SPAWN_AGENT_DESCRIPTION, tool: J5SpawnAgentTool },
   { name: "j5_propose_crew", description: J5_PROPOSE_CREW_DESCRIPTION, tool: J5ProposeCrewTool },
   {
@@ -100,7 +105,6 @@ it("publishes the ratified single-target lifecycle contracts fail-closed", () =>
     "j5_playbook_list",
     "j5_playbook_next",
     "j5_playbook_read",
-    "j5_playbook_reselect",
     "j5_playbook_save",
     "j5_playbook_start",
     "j5_send_message",

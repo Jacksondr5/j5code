@@ -150,7 +150,6 @@ it.each(["thread", "Fleet"] as const)(
         steps: [{ id: "first", title: "First" }],
         position: 1,
         total: 1,
-        issue: null,
       },
     ];
     await act(() => {

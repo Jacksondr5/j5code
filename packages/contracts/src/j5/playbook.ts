@@ -94,6 +94,7 @@ export const PlaybookRun = Schema.Struct({
   ownerThreadId: ThreadId,
   definitionPath: Text,
   currentStepId: Text,
+  cancelReason: Schema.optionalKey(Schema.NullOr(Schema.String)),
   status: Schema.Literals(["active", "completed", "cancelled"]),
   createdAt: Text,
   updatedAt: Text,
@@ -116,12 +117,12 @@ export type PlaybookStepDelivery = typeof PlaybookStepDelivery.Type;
 /** The progress bar receives titles, never the other steps' prompt bodies. */
 export const PlaybookProgress = Schema.Struct({
   ...PlaybookRun.fields,
+  issue: Schema.optionalKey(Schema.NullOr(PlaybookError)),
   title: Schema.String,
   description: Schema.String,
   steps: Schema.Array(Schema.Struct({ id: Text, title: Text })),
   position: Schema.NullOr(Schema.Int),
   total: Schema.Int,
-  issue: Schema.NullOr(PlaybookError),
 });
 export type PlaybookProgress = typeof PlaybookProgress.Type;
 export const PlaybookStepResponse = Schema.Struct({

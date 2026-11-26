@@ -397,8 +397,8 @@ it.effect("keeps a run whose definition broke visible, and reflects its cancella
     const broken = (yield* listThreadRuns(owner)).runs[0]!;
     assert.equal(broken.status, "active");
     assert.equal(broken.currentStepId, "one");
-    assert.equal(broken.issue?.code, "invalid_definition");
-    assert.deepStrictEqual(broken.steps, []);
+
+    assert.lengthOf(broken.steps, 2);
     yield* store.mutate(owner, {
       operation: "cancel",
       runId: run.runId,
@@ -406,7 +406,6 @@ it.effect("keeps a run whose definition broke visible, and reflects its cancella
     });
     const cancelled = (yield* listThreadRuns(owner)).runs[0]!;
     assert.equal(cancelled.status, "cancelled");
-    assert.isNull(cancelled.issue);
   }).pipe(Effect.scoped, Effect.provide(TestLayer)),
 );
 
@@ -443,34 +442,34 @@ it.effect("rejects missing, foreign, and deleted workspaces and bad names", () =
   }).pipe(Effect.scoped, Effect.provide(TestLayer)),
 );
 
-it.effect("deletes only the selected workspace's file, and never one a run is using", () =>
-  Effect.gen(function* () {
-    const { fs, filename, projectRoot, worktree, store, deletePlaybook } = yield* fixture;
-    const request = { projectId, name: "demo" };
-    assert.equal(yield* codeOf(deletePlaybook({ projectId, name: "../demo" })), "invalid_name");
-    assert.equal(yield* codeOf(deletePlaybook({ projectId, name: "demo/other" })), "invalid_name");
-    for (const input of [
-      { projectId: missingProjectId, name: "demo" },
-      { projectId, threadId: foreignThread, name: "demo" },
-    ])
-      assert.equal(yield* codeOf(deletePlaybook(input)), "workspace_not_found");
-    const run = yield* store.start(ThreadId.make("delete-owner"), projectRoot, "demo", "start");
-    assert.equal(yield* codeOf(deletePlaybook(request)), "in_use");
-    yield* store.mutate(run.ownerThreadId, {
-      operation: "cancel",
-      runId: run.runId,
-      client_request_id: "cancel",
-    });
-    assert.deepStrictEqual(yield* deletePlaybook(request), { deleted: true });
-    assert.isFalse(yield* fs.exists(filename(projectRoot)));
-    assert.isTrue(yield* fs.exists(filename(worktree)));
-    assert.equal(yield* codeOf(deletePlaybook(request)), "not_found");
-    assert.equal((yield* store.listForThread(run.ownerThreadId)).runs[0]?.status, "cancelled");
-    assert.deepStrictEqual(yield* deletePlaybook({ ...request, threadId: worktreeThread }), {
-      deleted: true,
-    });
-    assert.isFalse(yield* fs.exists(filename(worktree)));
-  }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+it.effect(
+  "deletes only the selected workspace's file, while an active run carries on from its copy",
+  () =>
+    Effect.gen(function* () {
+      const { fs, filename, projectRoot, worktree, store, deletePlaybook } = yield* fixture;
+      const request = { projectId, name: "demo" };
+      assert.equal(yield* codeOf(deletePlaybook({ projectId, name: "../demo" })), "invalid_name");
+      assert.equal(
+        yield* codeOf(deletePlaybook({ projectId, name: "demo/other" })),
+        "invalid_name",
+      );
+      for (const input of [
+        { projectId: missingProjectId, name: "demo" },
+        { projectId, threadId: foreignThread, name: "demo" },
+      ])
+        assert.equal(yield* codeOf(deletePlaybook(input)), "workspace_not_found");
+      const run = yield* store.start(ThreadId.make("delete-owner"), projectRoot, "demo", "start");
+      assert.deepStrictEqual(yield* deletePlaybook(request), { deleted: true });
+      assert.equal((yield* store.current(run.ownerThreadId, run.runId)).status, "active");
+      assert.isFalse(yield* fs.exists(filename(projectRoot)));
+      assert.isTrue(yield* fs.exists(filename(worktree)));
+      assert.equal(yield* codeOf(deletePlaybook(request)), "not_found");
+      assert.equal((yield* store.listForThread(run.ownerThreadId)).runs[0]?.status, "active");
+      assert.deepStrictEqual(yield* deletePlaybook({ ...request, threadId: worktreeThread }), {
+        deleted: true,
+      });
+      assert.isFalse(yield* fs.exists(filename(worktree)));
+    }).pipe(Effect.scoped, Effect.provide(TestLayer)),
 );
 
 it.effect("can delete an invalid YAML definition without reading its contents", () =>
@@ -493,7 +492,7 @@ it.effect("renames the YAML title without changing its stable filename or active
     assert.equal(playbook?.title, "Renamed playbook");
     assert.equal(playbook?.description, "Purpose of Project library.");
     assert.equal(playbook?.steps[0]?.id, "first");
-    assert.equal((yield* store.current(run.ownerThreadId, run.runId)).title, "Renamed playbook");
+    assert.equal((yield* store.current(run.ownerThreadId, run.runId)).title, "Project library");
     assert.deepStrictEqual(yield* renamePlaybook(request), { renamed: false });
   }).pipe(Effect.scoped, Effect.provide(TestLayer)),
 );

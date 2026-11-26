@@ -42,7 +42,6 @@ export const J5_PREAPPROVED_TOOLS: ReadonlyArray<string> = [
   "j5_playbook_current",
   "j5_playbook_next",
   "j5_playbook_back",
-  "j5_playbook_reselect",
   "j5_playbook_complete",
   "j5_playbook_cancel",
 ];
@@ -62,7 +61,6 @@ export const J5_COORDINATION_TOOLS: ReadonlyArray<string> = [
   "j5_playbook_start",
   "j5_playbook_next",
   "j5_playbook_back",
-  "j5_playbook_reselect",
   "j5_playbook_complete",
   "j5_playbook_cancel",
 ];
