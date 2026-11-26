@@ -10,8 +10,13 @@ import {
   ProjectId,
   ProviderInstanceId,
   ThreadId,
+  WsRpcGroup,
 } from "@t3tools/contracts";
-import { requiredScopeForRpcMethod } from "../../auth/RpcAuthorization.ts";
+import {
+  type RPC_REQUIRED_SCOPES,
+  layer as rpcAuthorizationLayer,
+  requiredScopeForRpcMethod,
+} from "../../auth/RpcAuthorization.ts";
 import {
   J5_PLAYBOOK_WS_METHODS,
   LEVEL_PERMISSIONS,
@@ -24,6 +29,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as RpcTest from "effect/rpc/RpcTest";
 import * as SqlClient from "effect/sql/SqlClient";
 import { stringify } from "yaml";
 
@@ -215,6 +221,47 @@ it("requires an Owner's settings permission to change the library or read its fo
     assert.notInclude(LEVEL_PERMISSIONS.collaborator, AuthSettingsWriteScope);
   }
 });
+
+it.effect(
+  "lets an Owner save through RPC and refuses a Collaborator before calling the store",
+  () =>
+    Effect.gen(function* () {
+      const method = J5_PLAYBOOK_WS_METHODS.savePlaybook;
+      const group = WsRpcGroup.omit(
+        ...[...WsRpcGroup.requests.keys()].filter(
+          (tag): tag is Exclude<keyof typeof RPC_REQUIRED_SCOPES, typeof method> => tag !== method,
+        ),
+      );
+      const { handlers, store } = yield* fixture;
+      const input = { name: "new-review", yaml: stringify(definition("New review")) };
+      const makeClient = (role: "owner" | "collaborator") =>
+        RpcTest.makeClient(group).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              group.toLayerHandler(method, handlers[method]),
+              rpcAuthorizationLayer(LEVEL_PERMISSIONS[role]),
+            ),
+          ),
+        );
+      const collaborator = yield* makeClient("collaborator");
+      const refused = yield* Effect.flip(collaborator[method](input));
+      assert.include(refused, {
+        _tag: "EnvironmentAuthorizationError",
+        requiredPermission: AuthSettingsWriteScope,
+      });
+      assert.equal((yield* Effect.flip(store.read("", input.name))).code, "not_found");
+      const ownerClient = yield* makeClient("owner");
+      assert.deepStrictEqual(yield* ownerClient[method](input), { name: input.name, saved: true });
+      assert.equal((yield* store.read("", input.name)).title, "New review");
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        ServerConfig.layerTest(process.cwd(), { prefix: "j5-playbook-rpc-owner-" }).pipe(
+          Layer.provideMerge(TestLayer),
+        ),
+      ),
+    ),
+);
 
 it("requires read scope to read the library and runs, and to export a playbook", () => {
   for (const method of [

@@ -1653,11 +1653,24 @@ it.effect(
         )).code,
         "read_only",
       );
-      yield* fs.makeDirectory(path.join(stateDir, "playbooks"), { recursive: true });
-      yield* fs.writeFileString(
-        path.join(stateDir, "playbooks/shared.yaml"),
-        stringify(definition()),
+      const changed = stringify({ ...definition(), title: "Environment override" });
+      assert.equal(
+        (yield* Effect.flip(store.saveDefinition({ name: "shared", yaml: changed }))).code,
+        "already_exists",
       );
+      yield* store.saveDefinition({ name: "shared", yaml: changed, overrideFolder: true });
+      assert.equal((yield* store.read(workspaceRoot, "shared")).title, "Environment override");
+      assert.isTrue(
+        (yield* store.discover(workspaceRoot)).playbooks.find((entry) => entry.name === "shared")
+          ?.overridesFolder,
+      );
+      yield* store.removeDefinition("", "shared", { kind: "environment" });
+      assert.equal((yield* store.read(workspaceRoot, "shared")).source?.kind, "folder");
+      yield* store.saveDefinition({ name: "shared", yaml: changed, overrideFolder: true });
+      const second = path.join(stateDir, "second");
+      yield* fs.makeDirectory(second);
+      yield* fs.writeFileString(path.join(second, "shared.yaml"), stringify(definition()));
+      yield* store.setFolders({ folders: ["external", second] });
       assert.equal(
         (yield* Effect.flip(store.read(workspaceRoot, "shared"))).code,
         "duplicate_name",

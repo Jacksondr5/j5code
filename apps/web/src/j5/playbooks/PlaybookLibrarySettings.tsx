@@ -1,5 +1,8 @@
 import { useAtomValue } from "@effect/atom-react";
-import { playbookStepLabel } from "@t3tools/client-runtime/j5/playbooks";
+import {
+  PLAYBOOK_FOLDER_OVERRIDE_WARNING,
+  playbookStepLabel,
+} from "@t3tools/client-runtime/j5/playbooks";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { PLAYBOOK_MAX_BYTES, type PlaybookSource } from "@t3tools/contracts/j5";
 import type { EnvironmentId, ProjectId } from "@t3tools/contracts";
@@ -115,6 +118,13 @@ function PlaybookLibrary({
     source: PlaybookSource;
     destination: EnvironmentId;
   } | null>(null);
+  const overridesFolder =
+    copyTarget?.source.kind === "folder" &&
+    copyTarget.destination === environmentId &&
+    copyTarget.targetName.trim() === copyTarget.name;
+  const canSaveDestination = useAtomValue(
+    j5Environment.savePlaybook.permissionAtom(copyTarget?.destination ?? environmentId),
+  );
   const folderPaths = (sources.data?.folders ?? []).flatMap((entry) =>
     entry.source.kind === "folder" ? [entry.source.path] : [],
   );
@@ -150,7 +160,11 @@ function PlaybookLibrary({
     if (exported._tag === "Failure") throw squashAtomCommandFailure(exported);
     const result = await save({
       environmentId: target.destination,
-      input: { name: target.targetName.trim(), yaml: exported.value.yaml },
+      input: {
+        name: target.targetName.trim(),
+        yaml: exported.value.yaml,
+        ...(overridesFolder ? { overrideFolder: true } : {}),
+      },
     });
     if (result._tag === "Failure") throw squashAtomCommandFailure(result);
     toastManager.add({
@@ -281,6 +295,7 @@ function PlaybookLibrary({
                     {source.kind === "folder" ? " · From source folder" : ""}
                     {source.kind === "workspace" ? ` · From ${project?.title ?? "project"}` : ""}
                     {playbook.overridesLibrary ? " · Overrides library copy" : ""}
+                    {playbook.overridesFolder ? " · Overrides team folder" : ""}
                   </span>
                   {playbook.issue ? (
                     <p role="alert" className="text-destructive">
@@ -595,6 +610,11 @@ function PlaybookLibrary({
                 </DialogDescription>
               </DialogHeader>
               <DialogPanel>
+                {overridesFolder ? (
+                  <p className="mb-3 text-sm text-muted-foreground">
+                    {PLAYBOOK_FOLDER_OVERRIDE_WARNING}
+                  </p>
+                ) : null}
                 <Input
                   autoFocus
                   aria-label="Name for the copied playbook"
@@ -619,7 +639,10 @@ function PlaybookLibrary({
                 >
                   Cancel
                 </Button>
-                <Button type="submit" disabled={busy || !copyTarget.targetName.trim()}>
+                <Button
+                  type="submit"
+                  disabled={busy || !canSaveDestination || !copyTarget.targetName.trim()}
+                >
                   Copy
                 </Button>
               </DialogFooter>

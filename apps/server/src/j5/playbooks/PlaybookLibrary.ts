@@ -37,18 +37,25 @@ export const selectPlaybookSource = (
 ) => {
   const candidates = inventory.filter((entry) => entry.names.includes(name));
   const local = candidates.find((entry) => entry.source.kind === "workspace");
-  const entry = local ?? candidates[0];
+  const environment = candidates.find((entry) => entry.source.kind === "environment");
+  const folders = candidates.filter((entry) => entry.source.kind === "folder");
+  const entry = local ?? environment ?? folders[0];
   const issue =
     local || explicitSource
       ? null
       : (inventory.find((entry) => entry.issue !== null)?.issue ??
-        (candidates.length > 1
+        (folders.length > 1
           ? playbookError(
               "duplicate_name",
-              `Playbook ${name} exists in multiple libraries: ${candidates.map((entry) => entry.path).join(", ")}. Rename a copy or remove a source.`,
+              `Playbook ${name} exists in multiple source folders: ${folders.map((entry) => entry.path).join(", ")}. Rename a copy or remove a source.`,
             )
           : null));
-  return { entry, issue, overridesLibrary: local !== undefined && candidates.length > 1 };
+  return {
+    entry,
+    issue,
+    overridesLibrary: local !== undefined && candidates.length > 1,
+    overridesFolder: local === undefined && environment !== undefined && folders.length > 0,
+  };
 };
 
 /** Server-local libraries; callers never supply a filesystem write destination. */
@@ -233,16 +240,20 @@ export const makePlaybookLibrary = Effect.gen(function* () {
     if (input.expectedDigest !== undefined)
       return yield* playbookError(
         "not_found",
-        "Only environment library playbooks can be edited with j5_playbook_save. Edit a workspace playbook's file directly; a source folder's playbooks are edited in that folder.",
+        "There is no environment library copy to edit. For a team folder, use overrideFolder to create one after approval. Edit a workspace playbook in its file.",
       );
     const inventory = yield* sources(undefined);
-    if (inventory.some((entry) => entry.names.includes(input.name)))
+    const selection = selectPlaybookSource(inventory, input.name);
+    if (selection.issue) return yield* selection.issue;
+    if (selection.entry?.source.kind === "environment")
+      return yield* playbookError("already_exists", "A library playbook already has this name.");
+    if (selection.entry?.source.kind === "folder" && !input.overrideFolder)
       return yield* playbookError(
         "already_exists",
-        "A library already contains this name. Choose another name.",
+        "A team folder has this playbook. The library copy hides later team updates. Removing it restores the team version. Ask the user to approve an override before saving with overrideFolder.",
       );
-    const unavailable = inventory.find((entry) => entry.issue !== null);
-    if (unavailable) return yield* unavailable.issue!;
+    if (input.overrideFolder && selection.entry?.source.kind !== "folder")
+      return yield* playbookError("source_not_found", "No team folder has this playbook.");
     return yield* Effect.scoped(
       Effect.gen(function* () {
         const temporary = yield* fs.makeTempDirectoryScoped({ directory, prefix: ".save-" });

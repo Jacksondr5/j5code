@@ -1,6 +1,9 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useFocusEffect } from "@react-navigation/native";
-import { playbookStepLabel } from "@t3tools/client-runtime/j5/playbooks";
+import {
+  PLAYBOOK_FOLDER_OVERRIDE_WARNING,
+  playbookStepLabel,
+} from "@t3tools/client-runtime/j5/playbooks";
 import { settlePromise, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentId, ProjectId } from "@t3tools/contracts";
 import type { PlaybookSource } from "@t3tools/contracts/j5";
@@ -85,6 +88,10 @@ function PlaybookLibrary({
     destination: EnvironmentId;
     source: PlaybookSource;
   } | null>(null);
+  const overridesFolder =
+    copyTarget?.source.kind === "folder" &&
+    copyTarget.destination === environmentId &&
+    name.trim() === copyTarget.name;
   const [renameTarget, setRenameTarget] = useState<{
     name: string;
     title: string;
@@ -330,6 +337,7 @@ function PlaybookLibrary({
                 : ""}
               {source.kind === "environment" ? ` · Library on ${label}` : ""}
               {playbook.overridesLibrary ? " · Overrides library copy" : ""}
+              {playbook.overridesFolder ? " · Overrides team folder" : ""}
             </Text>
             {playbook.issue ? (
               <Text accessibilityRole="alert" className="text-danger-foreground">
@@ -444,6 +452,11 @@ function PlaybookLibrary({
                 <Text className="text-foreground-muted">
                   Available in every project on the environment.
                 </Text>
+                {overridesFolder ? (
+                  <Text className="text-sm text-foreground-muted">
+                    {PLAYBOOK_FOLDER_OVERRIDE_WARNING}
+                  </Text>
+                ) : null}
                 <TextInput
                   accessibilityLabel={renameTarget ? "Playbook title" : "Playbook name"}
                   placeholder={renameTarget ? "Title" : "release-review"}
@@ -507,7 +520,11 @@ function PlaybookLibrary({
                           }
                           const result = await save({
                             environmentId: copyTarget?.destination ?? environmentId,
-                            input: { name, yaml: text },
+                            input: {
+                              name: name.trim(),
+                              yaml: text,
+                              ...(overridesFolder ? { overrideFolder: true } : {}),
+                            },
                           });
                           if (result._tag === "Failure") throw squashAtomCommandFailure(result);
                           setImporting(false);

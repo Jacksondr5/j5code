@@ -5,6 +5,11 @@ import { assert, it } from "@effect/vitest";
 import {
   EnvironmentId,
   EventId,
+  MessageId,
+  type OrchestrationV2ConversationMessage,
+  type OrchestrationV2Run,
+  RunId,
+  ScheduledTaskId,
   ProjectId,
   ProviderInstanceId,
   ProviderDriverKind,
@@ -25,6 +30,7 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
+import * as SqlClient from "effect/sql/SqlClient";
 import { stringify } from "yaml";
 
 import { ServerConfig } from "../../config.ts";
@@ -87,8 +93,51 @@ const sample = (title: string) => ({
   ],
 });
 
+const kickoffRecords = (threadId: ThreadId, text = "Check current work.", source?: string) => {
+  const time = DateTime.makeUnsafe(createdAt);
+  const shell = liveThreadShell(threadId);
+  const runId = RunId.make("run:mcp-test");
+  const messageId = MessageId.make("message:launch");
+  const run: OrchestrationV2Run = {
+    id: runId,
+    ordinal: 1,
+    status: "running",
+    threadId,
+    providerInstanceId: shell.providerInstanceId,
+    modelSelection: shell.modelSelection,
+    providerThreadId: null,
+    userMessageId: messageId,
+    rootNodeId: null,
+    activeAttemptId: null,
+    requestedAt: time,
+    startedAt: time,
+    completedAt: null,
+    checkpointId: null,
+    contextHandoffId: null,
+  };
+  const message: OrchestrationV2ConversationMessage = {
+    id: messageId,
+    threadId,
+    runId,
+    nodeId: null,
+    role: "user",
+    text,
+    attachments: [],
+    streaming: false,
+    createdBy: source === "agent" ? "agent" : "user",
+    creationSource: "web",
+    createdAt: time,
+    updatedAt: time,
+    ...(source === "scheduled" ? { scheduledTaskId: ScheduledTaskId.make("weekly") } : {}),
+  };
+  return { runs: [run] as const, messages: [message] as const };
+};
 const makeFixture = (
   shell: (threadId: ThreadId) => ReturnType<typeof liveThreadShell> = liveThreadShell,
+  runRecords: (threadId: ThreadId) => {
+    readonly runs: ReadonlyArray<OrchestrationV2Run>;
+    readonly messages: ReadonlyArray<OrchestrationV2ConversationMessage>;
+  } = (threadId) => kickoffRecords(threadId),
 ) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
@@ -115,8 +164,8 @@ const makeFixture = (
         // The access gate reads the calling thread before each tool.
         getThreadShell: (threadId) => Effect.succeed(shell(threadId)),
         getThreadRecords: (threadId) =>
-          Effect.succeed(
-            emptyProjection({
+          Effect.succeed({
+            ...emptyProjection({
               id: EventId.make(`created:${threadId}`),
               type: "thread.created",
               threadId,
@@ -154,7 +203,8 @@ const makeFixture = (
                 deletedAt: null,
               },
             }),
-          ),
+            ...runRecords(threadId),
+          }),
       }),
       Layer.mock(ProjectService)({
         getById: () =>
@@ -205,6 +255,30 @@ const makeFixture = (
     return { call, fs, path, worktree, projectRoot };
   });
 const fixture = makeFixture();
+const stampActiveTurn = Effect.fn("test.stampActiveTurn")(function* (
+  source: "owner" | "collaborator" | "scheduled" | "unattributed" | "agent" | "revoked",
+) {
+  const sql = yield* SqlClient.SqlClient;
+  const messageId = "message:launch";
+  const person = "human:active-turn";
+  if (source === "unattributed") {
+    yield* sql`INSERT INTO j5_a2a_shared_thread (thread_id, shared_at) VALUES (${owner}, ${createdAt})`;
+    return;
+  }
+  yield* sql`
+    INSERT INTO j5_a2a_human_person (person_id, is_local_operator, created_at)
+    VALUES (${person}, 0, ${createdAt})
+  `;
+  yield* sql`
+    INSERT INTO j5_a2a_person_level (person_id, scope_kind, scope_id, level, created_at, updated_at)
+    VALUES (${person}, 'server', '', ${source === "collaborator" || source === "revoked" ? "collaborator" : "owner"},
+      ${createdAt}, ${createdAt})
+  `;
+  yield* sql`
+    INSERT INTO j5_a2a_message_author (thread_id, message_id, person_id, level, stored_prefix, created_at)
+    VALUES (${owner}, ${messageId}, ${person}, ${source === "collaborator" ? "collaborator" : "owner"}, '', ${createdAt})
+  `;
+});
 const TestLayer = Layer.mergeAll(
   NodeSqliteClient.layer({ filename: ":memory:" }),
   Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
@@ -430,11 +504,30 @@ it.effect("reads step personas and warnings through the toolkit and still starts
   ),
 );
 
+it.effect("saves from a private turn attributed to the first Owner", () =>
+  Effect.gen(function* () {
+    const { call } = yield* fixture;
+    const saved = yield* call("j5_playbook_save", {
+      name: "private",
+      yaml: stringify(sample("Private request")),
+    });
+    assert.isFalse(saved.isFailure);
+  }).pipe(
+    Effect.scoped,
+    Effect.provide(
+      ServerConfig.layerTest(process.cwd(), { prefix: "j5-playbook-private-save-" }).pipe(
+        Layer.provideMerge(TestLayer),
+      ),
+    ),
+  ),
+);
+
 it.effect(
   "saves a shared playbook through the real MCP tool and reads it from root and worktree callers",
   () =>
     Effect.gen(function* () {
       const { call, fs, path, projectRoot, worktree } = yield* fixture;
+      yield* stampActiveTurn("owner");
       const saved = yield* call("j5_playbook_save", {
         name: "shared",
         yaml: stringify(sample("Shared playbook")),
@@ -470,10 +563,39 @@ it.effect(
     ),
 );
 
+it.effect.each(["collaborator", "scheduled", "unattributed", "agent", "revoked"] as const)(
+  "refuses a library save during a %s turn",
+  (source) =>
+    Effect.gen(function* () {
+      const { call, fs, path } = yield* makeFixture(liveThreadShell, (id) =>
+        kickoffRecords(id, undefined, source),
+      );
+      yield* stampActiveTurn(source);
+      const result = yield* call("j5_playbook_save", {
+        name: "refused",
+        yaml: stringify(sample("Refused")),
+      });
+      assert.isTrue(result.isFailure);
+      const refusal = yield* decodeFailure(result.result);
+      assert.equal(refusal.code, "owner_required");
+      assert.include(refusal.message, "Keep the full YAML draft");
+      const { stateDir } = yield* ServerConfig;
+      assert.isFalse(yield* fs.exists(path.join(stateDir, "playbooks/refused.yaml")));
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        ServerConfig.layerTest(process.cwd(), { prefix: "j5-playbook-mcp-refuse-" }).pipe(
+          Layer.provideMerge(TestLayer),
+        ),
+      ),
+    ),
+);
+
 it.effect("maps stored persona policies before permitting playbook definition writes", () =>
   Effect.gen(function* () {
     const { fs, path } = yield* fixture;
     const { stateDir } = yield* ServerConfig;
+    yield* stampActiveTurn("owner");
     const plan = yield* makeFixture((threadId) => ({
       ...liveThreadShell(threadId),
       interactionMode: "plan",
