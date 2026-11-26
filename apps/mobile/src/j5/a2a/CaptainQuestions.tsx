@@ -165,6 +165,7 @@ export function QuestionPanel(props: {
     <SenderMarkdown
       markdown={value}
       environmentId={shown.environmentId}
+      projectId={shown.projectId}
       senderThreadId={shown.senderThreadId}
     />
   );
