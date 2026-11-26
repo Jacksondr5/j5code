@@ -39,7 +39,8 @@ import { A2ALedger, layer as ledgerLayer } from "../a2a/LedgerService.ts";
 import { runJ5A2AMigrations } from "../a2a/Migrations.ts";
 import { LedgerProjectId } from "../a2a/contracts.ts";
 import { makePlaybookCrewRelay } from "./PlaybookCrewRelay.ts";
-import { makePlaybookStore, PlaybookStore } from "./PlaybookStore.ts";
+import { PlaybookStore } from "./PlaybookStore.ts";
+import { makePlaybookStoreForTests } from "./testFixtures.ts";
 import { seedPlaybookOwners } from "./testFixtures.ts";
 
 const projectId = LedgerProjectId.make("project:runtime-holders");
@@ -199,7 +200,7 @@ const fixture = Effect.gen(function* () {
         ),
       ),
   } as unknown as ThreadManagementService["Service"]);
-  const store = yield* makePlaybookStore;
+  const store = yield* makePlaybookStoreForTests;
   const relay = yield* makePlaybookCrewRelay.pipe(
     Effect.provideService(PlaybookStore, store),
     Effect.provideService(AgentCrewInstanceService, crews),

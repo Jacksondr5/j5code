@@ -437,7 +437,7 @@ export const FleetPlaybookRun = Schema.Struct({
   total: Schema.Number,
   stepId: Schema.String,
   stepTitle: Schema.String,
-  state: Schema.Literals(["delivered", "captain", "pending"]),
+  state: Schema.Literals(["delivered", "captain", "pending", "blocked"]),
   holderParticipantId: Schema.NullOr(Schema.String),
   holderLabel: Schema.String,
 });

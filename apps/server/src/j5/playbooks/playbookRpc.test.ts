@@ -41,7 +41,8 @@ import {
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { ProjectService } from "../../project/ProjectService.ts";
 import { runJ5A2AMigrations } from "../a2a/Migrations.ts";
-import { makePlaybookStore, playbookError } from "./PlaybookStore.ts";
+import { playbookError } from "./PlaybookStore.ts";
+import { makePlaybookStoreForTests } from "./testFixtures.ts";
 import { makePlaybookRpcHandlers, PLAYBOOK_RPC_SCOPES } from "./playbookRpc.ts";
 
 const projectId = ProjectId.make("project:playbook-rpc");
@@ -86,7 +87,7 @@ const fixture = Effect.gen(function* () {
   }
   yield* runJ5A2AMigrations();
   yield* seedPlaybookOwners(["delete-owner", "rename-owner", owner, otherOwner]);
-  const store = yield* makePlaybookStore;
+  const store = yield* makePlaybookStoreForTests;
   const projects = Layer.mock(ProjectService)({
     getById: (id) =>
       Effect.succeed(

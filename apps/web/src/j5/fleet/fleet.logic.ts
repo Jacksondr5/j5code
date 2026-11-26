@@ -23,11 +23,13 @@ export interface FleetCrewGroup {
 
 /** The recorded holder remains visible even while its notice is pending. */
 export const playbookRunOwnerLabel = (run: Pick<FleetPlaybookRun, "state" | "holderLabel">) =>
-  run.state === "delivered"
-    ? run.holderLabel
-    : run.state === "captain"
-      ? "Owner"
-      : `handing off to ${run.holderLabel}`;
+  run.state === "blocked"
+    ? "Waiting for required persona"
+    : run.state === "delivered"
+      ? run.holderLabel
+      : run.state === "captain"
+        ? "Owner"
+        : `handing off to ${run.holderLabel}`;
 
 /** The DOM id of a live Crew's group on the Fleet page, unique across environments. */
 export const fleetCrewAnchorId = (environmentId: string, crewInstanceId: string) =>

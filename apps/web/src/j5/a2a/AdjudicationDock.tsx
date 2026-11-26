@@ -294,6 +294,8 @@ export function AdjudicationDock(props: {
             ) : null}
             {isOpen && playbookDecision ? (
               <PlaybookDecisionButtons
+                environmentId={environmentId}
+                exchangeId={shown.exchangeId}
                 reason={words}
                 disabled={pending || waitingOn !== null}
                 submit={answer}

@@ -59,7 +59,7 @@ export const routeFailurePhrase = (
  * Why each route was refused, so the person who approved a seat (or the agent that asked for one)
  * learns "codex is signed out" rather than "unavailable" (Jackson's dogfood, 2026-09-17).
  */
-const describeRouteAttempts = (
+export const describeRouteAttempts = (
   attempts: ReadonlyArray<AgentPersonaRouteAttempt>,
   providers: ReadonlyArray<ServerProvider>,
 ) =>

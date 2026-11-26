@@ -34,7 +34,7 @@ import { CrewCaptainArchiveCascade } from "./CrewCaptainArchiveCascade.ts";
 import { ServerConfig } from "../../config.ts";
 import { EventSinkV2 } from "../../orchestration-v2/EventSink.ts";
 import { ArtifactWorkspace } from "../artifacts/ArtifactWorkspace.ts";
-import { playbookStoreLayer } from "../playbooks/PlaybookStore.ts";
+import { playbookStoreTestLayer } from "../playbooks/testFixtures.ts";
 import { CrewSeatFinishNotifier, manualLayer as notifierLayer } from "./CrewSeatFinishNotifier.ts";
 import { OrchestratorProjectionError } from "../../orchestration-v2/Orchestrator.ts";
 import {
@@ -391,7 +391,7 @@ const makeFixture = Effect.fn("test.j5.crewLaunchReporter.fixture")(function* (
     Layer.provideMerge(
       Layer.succeed(AgentCrewInstanceService, options?.wrapCrews?.(crews) ?? crews),
     ),
-    Layer.provideMerge(playbookStoreLayer),
+    Layer.provideMerge(playbookStoreTestLayer),
     Layer.provideMerge(Layer.succeedContext(context)),
     Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
     Layer.provideMerge(Layer.mock(A2ADeliveryWorker)({ notify: Effect.void })),

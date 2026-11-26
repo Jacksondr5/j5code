@@ -63,6 +63,7 @@ export const invokeAgent = Effect.fn("j5.invokeAgent")(function* (
   const { assignment, runtimeMode: childMode } = yield* pickAgentPersona({
     personaId: input.personaId,
     source: yield* turnPickSource(thread.threadId, input.personaId).pipe(Effect.mapError(refused)),
+    ownerThreadId: thread.threadId,
     caller: { thread: parent.thread },
     projectId: parent.thread.projectId,
     reviewAuthors: {

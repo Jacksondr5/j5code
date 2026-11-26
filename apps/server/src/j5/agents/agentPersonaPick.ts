@@ -2,6 +2,7 @@ import {
   AgentPersonaBlockCode,
   AgentPersonaPickConstraint,
   isAgentPersonaReasoningOptionId,
+  type AgentPersonaAuthorityPolicy,
   type ProviderDriverKind,
   type ProviderOptionSelection,
   type OrchestrationV2AgentPersonaCommandAssignment,
@@ -133,6 +134,18 @@ const withinAccess = (child: AgentAccess, limit: AgentAccess) =>
   !broaderThan(child.runtimeMode, limit.runtimeMode) &&
   (limit.sandbox !== "readOnly" || child.sandbox === "readOnly");
 
+export const agentPersonaAccessLimit =
+  (
+    limit: AgentAccess,
+    accessOn: (authority: AgentPersonaAuthorityPolicy, driver: ProviderDriverKind) => AgentAccess,
+  ): AgentPersonaPickLimits["accessAbove"] =>
+  (authority, driver) => {
+    const child = accessOn(authority, driver);
+    return withinAccess(child, limit)
+      ? undefined
+      : `on ${driverLabel(driver)} it would run with ${accessLabel(child)}, which is broader than the ${accessLabel(limit)} its caller runs with`;
+  };
+
 /**
  * The access limit on anything an agent picks. `subject` names the worker, e.g. "Custom seat
  * reviewer".
@@ -198,6 +211,8 @@ const reviewAuthorsFor = Effect.fn("j5.agents.reviewAuthorsFor")(function* (
 export interface AgentPersonaPickInput {
   readonly personaId: AgentPersonaId;
   readonly source: AgentPersonaPickSourceKind;
+  /** The actual launching thread, when it can hold a playbook approval. */
+  readonly ownerThreadId?: ThreadId | undefined;
   readonly caller: AgentPersonaPickCaller;
   readonly projectId: ProjectId;
   readonly pinned?: {
@@ -223,9 +238,22 @@ export interface AgentPersonaPickInput {
  * `escalateFor`; a granted `allowOnce` lifts one limit, and the caller spends it on launch.
  */
 export const pickAgentPersona = Effect.fn("j5.agents.pickAgentPersona")(function* (
-  input: AgentPersonaPickInput,
+  requested: AgentPersonaPickInput,
 ) {
   const escalations = yield* AgentPersonaEscalations;
+  const approved =
+    requested.source === "agent" &&
+    requested.ownerThreadId !== undefined &&
+    (yield* escalations.approvedRunPicks(requested.ownerThreadId).pipe(
+      Effect.mapError(
+        () =>
+          new AgentPersonaPickError({
+            message: "Playbook persona approvals could not be read.",
+            constraint: null,
+          }),
+      ),
+    )).has(requested.personaId);
+  const input = approved ? { ...requested, source: "person" as const } : requested;
   const agentPick = input.source === "agent";
   // A person's pick has no limits to lift, so it neither checks nor spends a grant.
   const grant =
@@ -376,12 +404,7 @@ const pickWithin = Effect.fn("j5.agents.pickWithin")(function* (
       : {
           eligible:
             input.eligible ?? (yield* (yield* CrewMemberModels).eligibility(input.projectId)),
-          accessAbove: (authority, driver) => {
-            const child = accessOn(authority, driver);
-            return withinAccess(child, limit)
-              ? undefined
-              : `on ${driverLabel(driver)} it would run with ${accessLabel(child)}, which is broader than the ${accessLabel(limit)} its caller runs with`;
-          },
+          accessAbove: agentPersonaAccessLimit(limit, accessOn),
           waived:
             grant === undefined
               ? undefined
