@@ -375,15 +375,15 @@ export const makePlaybookCrewRelay = Effect.gen(function* () {
   /** Where a Crew's active run is and who holds its step, as Fleet shows it; null when none. */
   const fleetRun = Effect.fn("PlaybookCrewRelay.fleetRun")(function* (crewInstanceId: string) {
     const run = yield* store.activeRunForCrew(crewInstanceId);
-    if (run === null) return null;
+    if (run === null || run.position === null) return null;
     const delivery = yield* currentDelivery(run.runId, run.currentStepId);
     if (delivery === null) return null;
     return {
       runId: run.runId,
-      position: run.position!,
+      position: run.position,
       total: run.total,
       stepId: run.currentStepId,
-      stepTitle: run.steps[run.position! - 1]?.title ?? run.currentStepId,
+      stepTitle: run.steps[run.position - 1]?.title ?? run.currentStepId,
       state: delivery.state,
       seat: delivery.seat,
     } satisfies NonNullable<FleetCrew["playbookRun"]>;
