@@ -111,7 +111,7 @@ export const J5SendMessageInput = Schema.Struct({
     Schema.NullOr(
       Schema.String.check(Schema.isNonEmpty()).annotate({
         description:
-          "One line saying what an ask (expect_reply=true) is about. It labels the ask and does not change how the message is delivered; to interrupt a busy agent, set mode.",
+          "One line saying what an ask (expect_reply=true) is about. It labels the ask and does not change how the message is delivered.",
       }),
     ),
   ),
@@ -146,7 +146,7 @@ export const J5SendMessageInput = Schema.Struct({
     Schema.NullOr(
       SendMode.annotate({
         description:
-          "Set this to interrupt an agent that is mid-turn. steer puts your message into the turn it is running now. restart stops that turn and starts it again on your message. queue, the default, is ordinary delivery: into the running turn for Claude and Codex GPT 6 agents, and after the turn ends for the others.",
+          "Leave unset for ordinary delivery: into a busy agent's running turn where its provider can take it, else after the turn. queue waits for the turn to end. steer also reaches an agent that takes a message mid-turn only by restarting. restart stops the running turn and starts it again on your message.",
       }),
     ),
   ),

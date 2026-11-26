@@ -421,9 +421,10 @@ const handlers = {
       const crypto = yield* SecureRandom.SecureRandom;
       const service = yield* A2ASendService;
       const worker = yield* A2ADeliveryWorker;
+      // Only a steer or a restart is checked below; the default and `queue` need no mode check.
       const mode = input.mode ?? "queue";
       const attachments = input.attachments ?? [];
-      // A plain queued message needs nothing read first. A file is claimed into the receiver's
+      // A plain message needs nothing read first. A file is claimed into the receiver's
       // thread, so its receiver must be an agent on this server. A steer or a restart acts on the
       // receiver's turn: here this server checks it, and on a peer server that server does.
       const receiver =
@@ -509,7 +510,7 @@ const handlers = {
           ...(input.regarding == null ? {} : { regarding: input.regarding }),
           ...(input.intent == null ? {} : { intent: input.intent }),
           ...(input.urgency == null ? {} : { urgency: input.urgency }),
-          ...(mode === "queue" ? {} : { mode }),
+          ...(input.mode == null ? {} : { mode: input.mode }),
           ...(modeLimit === undefined ? {} : { modeLimit }),
           ...(claimed === undefined ? {} : { attachments: claimed }),
           acceptedAt,
@@ -536,7 +537,7 @@ const handlers = {
       return yield* withDeliveryNotice(sent, {
         receiverId: input.to,
         callerThreadId: scope.thread.threadId,
-        mode,
+        mode: input.mode ?? undefined,
       });
     }).pipe(Effect.mapError(failure)),
   ),

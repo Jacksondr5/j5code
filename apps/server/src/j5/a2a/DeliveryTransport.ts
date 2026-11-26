@@ -11,7 +11,6 @@ import {
   peerCredentialRejectedReason,
   type PeerDeliveryRequest,
 } from "@t3tools/contracts/j5";
-import { codexModelFamily, normalizeModelSlug } from "@t3tools/shared/model";
 import {
   latestExecutedRun,
   orchestrationV2WorktreePending,
@@ -27,6 +26,7 @@ import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientRequest } from "effect/http";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import { isNativeMaintenanceCommand } from "../../orchestration-v2/CommandPolicy.ts";
 import * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";
 import { DispatchModeLimit, type DispatchModes } from "../../orchestration-v2/DispatchModeLimit.ts";
 import { EffectOutboxV2 } from "../../orchestration-v2/EffectOutbox.ts";
@@ -125,7 +125,7 @@ export interface AgentDeliveryInput {
   readonly exchangeRole: "none" | "ask" | "followup" | "reply" | "terminal_notice";
   readonly message: string;
   readonly attachments?: ReadonlyArray<ChatAttachment>;
-  /** How the sender asked for the message to land; absent means `queue`. */
+  /** How the sender asked for the message to land; absent means upstream's `auto`. */
   readonly mode?: SendMode;
   /** The broadest modes the sender could touch when it asked for a steer or a restart. */
   readonly modeLimit?: DispatchModes;
@@ -187,10 +187,10 @@ export const deliveryCommandId = (messageId: LedgerMessageId) =>
   CommandId.make(`command:j5:a2a:delivery:${stablePart(messageId)}`);
 
 /**
- * The command an asked-for steer or restart, or a peer's steer into a running GPT 6 or Claude turn,
- * is dispatched under. It is not the delivery's own: upstream records a rejected command for good,
- * and rejects a restart aimed at a turn that has just ended and a steer to a run that Stop has
- * reached, so the plain delivery that follows must keep a command id that nothing has refused.
+ * The command an asked-for steer or restart is dispatched under. It is not the delivery's own:
+ * upstream records a rejected command for good, and rejects a restart aimed at a turn that has
+ * just ended and a steer to a run that Stop has reached, so the plain delivery that follows must
+ * keep a command id that nothing has refused.
  */
 const askedDeliveryCommandId = (messageId: LedgerMessageId, mode: Exclude<SendMode, "queue">) =>
   CommandId.make(`${deliveryCommandId(messageId)}:${mode}`);
@@ -249,41 +249,74 @@ const assertPersonReply = (input: AgentDeliveryInput): never => {
   );
 };
 
-// Every GPT 6 model (Astra, Luna, Sol and their point releases) takes messages during work.
-const isGpt6Model = (model: string | null) =>
-  model !== null && /^gpt-6[-.]/.test(codexModelFamily(model));
-
-/**
- * The running turn a peer's update steers into without being asked: a Codex GPT 6 turn or a
- * Claude turn. Use the active run's selection, not the picker selection for future runs.
- */
-export const peerSteeringRun = (
+/** The running turn a steer would land on, with its provider session's turn capabilities. */
+const steerableTurn = (
   target: Pick<
     OrchestrationV2ThreadProjection,
-    "thread" | "runs" | "providerTurns" | "providerThreads" | "providerSessions"
+    "runs" | "providerTurns" | "providerThreads" | "providerSessions"
   >,
-  channel: DeliveryEnvelopeChannel,
 ) => {
-  if (channel !== "peer" || target.thread.archivedAt !== null) return undefined;
   const run = ThreadManagement.latestSteerableRun(target);
   if (run === undefined) return undefined;
   const providerThread = target.providerThreads.find(
     (thread) => thread.id === run.providerThreadId,
   );
-  const session = target.providerSessions.find(
+  const turns = target.providerSessions.find(
     (candidate) => candidate.id === providerThread?.providerSessionId,
-  );
-  if (providerThread === undefined || session?.driver !== providerThread.driver) return undefined;
-  const turns = session.capabilities.turns;
-  // Claude's adapter sends a steer with priority "next", which waits for the running tool calls
-  // instead of cancelling them.
-  const claudeTakesPeerUpdates =
-    providerThread.driver === "claudeAgent" && turns.supportsActiveSteering === true;
-  const gpt6TakesPeerUpdates =
-    providerThread.driver === "codex" &&
-    turns.supportsActiveSteering === true &&
-    isGpt6Model(normalizeModelSlug(run.modelSelection.model, providerThread.driver));
-  return claudeTakesPeerUpdates || gpt6TakesPeerUpdates ? run : undefined;
+  )?.capabilities.turns;
+  return { run, turns };
+};
+
+/**
+ * How a delivery is handed to upstream (register D51). A sender's `queue` and J5's own notices
+ * wait for the turn, as does a default delivery when anything is queued for the receiver
+ * (upstream guards only queued agent messages) or its turn's steer would interrupt running tools.
+ */
+export const deliverySendMode = (
+  target: Pick<
+    OrchestrationV2ThreadProjection,
+    "runs" | "providerTurns" | "providerThreads" | "providerSessions"
+  >,
+  channel: DeliveryEnvelopeChannel,
+  mode: "queue" | undefined,
+) =>
+  mode === undefined &&
+  channel === "peer" &&
+  !target.runs.some((run) => run.status === "queued") &&
+  steerableTurn(target)?.turns?.activeSteeringInterruptsTools !== true
+    ? ("auto" as const)
+    : ("queue" as const);
+
+/**
+ * The running turn upstream's `auto` would steer a default delivery into now, as
+ * `resolveMessageDispatchIntent` decides it: a running provider turn whose provider steers
+ * directly, unless it is compaction or sign-out or Stop has reached it. `messages` and
+ * `turnItems` need only that run's message and its `run_interrupt_request` items.
+ */
+export const autoSteeringRun = (
+  target: Pick<
+    OrchestrationV2ThreadProjection,
+    | "thread"
+    | "runs"
+    | "messages"
+    | "turnItems"
+    | "providerTurns"
+    | "providerThreads"
+    | "providerSessions"
+  >,
+) => {
+  if (target.thread.archivedAt !== null || deliverySendMode(target, "peer", undefined) !== "auto")
+    return undefined;
+  const steerable = steerableTurn(target);
+  if (steerable?.turns?.supportsActiveSteering !== true) return undefined;
+  const { run } = steerable;
+  const message = target.messages.find((candidate) => candidate.id === run.userMessageId);
+  if (message !== undefined && isNativeMaintenanceCommand(message)) return undefined;
+  return target.turnItems.some(
+    (item) => item.type === "run_interrupt_request" && item.runId === run.id,
+  )
+    ? undefined
+    : run;
 };
 
 /**
@@ -301,15 +334,9 @@ export const requestedSteeringRun = (
   mode: Exclude<SendMode, "queue">,
 ) => {
   if (channel !== "peer" || target.thread.archivedAt !== null) return undefined;
-  const run = ThreadManagement.latestSteerableRun(target);
-  if (run === undefined) return undefined;
-  const providerThread = target.providerThreads.find(
-    (thread) => thread.id === run.providerThreadId,
-  );
-  const turns = target.providerSessions.find(
-    (candidate) => candidate.id === providerThread?.providerSessionId,
-  )?.capabilities.turns;
-  if (turns === undefined) return undefined;
+  const steerable = steerableTurn(target);
+  if (steerable?.turns === undefined) return undefined;
+  const { run, turns } = steerable;
   const restarts = turns.supportsInterrupt && turns.supportsSteeringByInterruptRestart;
   return (mode === "steer" ? turns.supportsActiveSteering || restarts : restarts) ? run : undefined;
 };
@@ -480,8 +507,9 @@ export const live: Layer.Layer<
               participantId: input.receiverId,
               state: "not an agent",
             });
-          // A steer may sit under the delivery's own command (Astra) or the one its sender asked
-          // for; its outcome, not the message in the thread, says whether the provider took it.
+          // A steer may sit under the delivery's own command (upstream's `auto`) or the one its
+          // sender asked for; its outcome, not the message in the thread, says whether the provider
+          // took it.
           const priorEffects = (yield* Effect.forEach(deliveryCommandIds(input.messageId), (id) =>
             outbox.listByCommandId(id),
           )).flat();
@@ -577,19 +605,12 @@ export const live: Layer.Layer<
             (effect) => effect.request.type === "provider-turn.steer",
           );
           if (priorSteer !== undefined) return yield* awaitSteeringOutcome(priorSteer.id);
-          // GPT 6 and Claude agents take peer updates during their long turns. Other models
-          // and platform notices retain QS1's queue policy.
           const alreadyAccepted = target.messages.some(
             (message) => message.id === deliveryMessageId(input.messageId),
           );
           const heldQueueRun = target.runs.find(
             (run) => run.status === "queued" && run.queueHeld === true,
           );
-          // A held queue keeps landing order: the update joins its back rather than steering.
-          const steeringRun =
-            alreadyAccepted || heldQueueRun !== undefined
-              ? undefined
-              : peerSteeringRun(target, input.envelopeChannel);
           // The header names the sender's project by id, with its title when the sender is on this
           // server. A peer server's project is not one of ours, so it is named by id alone.
           const originProject =
@@ -684,7 +705,11 @@ export const live: Layer.Layer<
             ...(senderThreadId === undefined ? {} : { senderThreadId }),
             text: envelope,
             attachments: input.attachments ?? [],
-            mode: "queue",
+            mode: deliverySendMode(
+              target,
+              input.envelopeChannel,
+              input.mode === "queue" ? "queue" : undefined,
+            ),
             createdBy:
               input.envelopeChannel === "silence_notice" ||
               input.envelopeChannel === "lifecycle_notice"
@@ -703,7 +728,7 @@ export const live: Layer.Layer<
                   }),
                 )
               : Effect.void;
-          // Register D4: a delivery to a held queue, idle or busy, resumes it and joins its back, so
+          // Register D51: a delivery to a held queue, idle or busy, resumes it and joins its back, so
           // messages run in landing order (a person's held ones too); a retry never resumes again.
           // Under a usage limit it waits unsent for the continue; after a failed worktree setup it
           // waits behind held messages.
@@ -746,8 +771,8 @@ export const live: Layer.Layer<
             yield* heldRun(accepted.runs.find((run) => run.userMessageId === sendInput.messageId));
             return true;
           });
-          const mode = input.mode ?? "queue";
-          if (mode !== "queue") {
+          const mode = input.mode;
+          if (mode === "steer" || mode === "restart") {
             // The sender asked for a steer or a restart (see `askedDeliveryCommandId`).
             const askedCommandId = askedDeliveryCommandId(input.messageId, mode);
             if (yield* landed(askedCommandId)) return;
@@ -778,7 +803,7 @@ export const live: Layer.Layer<
                   // The sender's limit when it sent. The receiver's user can raise its modes
                   // before delivery, and upstream checks again under the thread's lock.
                   Effect.provideService(DispatchModeLimit, input.modeLimit),
-                  // Refused or too late: the message is delivered as any other, below.
+                  // Refused or too late: the message waits its turn, below.
                   Effect.catch((cause) =>
                     Effect.logInfo("J5 A2A delivery could not land as its sender asked", {
                       messageId: input.messageId,
@@ -790,13 +815,13 @@ export const live: Layer.Layer<
               if (yield* landed(askedCommandId)) return;
             }
             yield* queueBehindHeld;
-            return yield* heldRun((yield* threads.sendToThread(sendInput)).run);
+            return yield* heldRun(
+              (yield* threads.sendToThread({ ...sendInput, mode: "queue" })).run,
+            );
           }
-          // A peer's steer into a GPT 6 or Claude run has the asked-for steer's command id, not the
-          // delivery's own: upstream refuses a steer to a run that Stop has reached and keeps that
-          // refusal for the command id, and the message then queues under the delivery's id.
+          // A delivery that steered under the asked-for steer's id before deliveries followed
+          // upstream's `auto` finds its message on a retry without sending it again.
           const runSteerCommandId = askedDeliveryCommandId(input.messageId, "steer");
-          // A retry after that steer was taken or refused finds the message without sending it again.
           if (
             alreadyAccepted &&
             (yield* threads.hasReceipt(runSteerCommandId)) &&
@@ -804,39 +829,9 @@ export const live: Layer.Layer<
           ) {
             return;
           }
-          if (steeringRun !== undefined) {
-            // Pin the checked run and model. If it completed before admission,
-            // upstream can accept this same message as a queued follow-up.
-            yield* threads
-              .dispatch({
-                type: "message.dispatch",
-                commandId: runSteerCommandId,
-                threadId: sendInput.threadId,
-                messageId: sendInput.messageId,
-                text: sendInput.text,
-                attachments: sendInput.attachments,
-                ...(sendInput.senderThreadId === undefined
-                  ? {}
-                  : { senderThreadId: sendInput.senderThreadId }),
-                createdBy: sendInput.createdBy,
-                creationSource: sendInput.creationSource,
-                modelSelection: steeringRun.modelSelection,
-                dispatchMode: { type: "steer_active", targetRunId: steeringRun.id },
-              })
-              .pipe(
-                Effect.catch((cause) =>
-                  Effect.logInfo("J5 A2A delivery could not steer into the running turn", {
-                    messageId: input.messageId,
-                    cause,
-                  }),
-                ),
-              );
-            if (yield* landed(runSteerCommandId)) return;
-          }
           yield* queueBehindHeld;
           yield* heldRun((yield* threads.sendToThread(sendInput)).run);
-          // Re-read even after queue dispatch: a delivery from before the steer had its own id
-          // may have committed this same command as a steer before our projection read.
+          // Upstream's `auto` steers under the delivery's own command id; wait for the provider.
           const steer = (yield* outbox.listByCommandId(sendInput.commandId)).find(
             (effect) => effect.request.type === "provider-turn.steer",
           );

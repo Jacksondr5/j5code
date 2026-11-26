@@ -466,9 +466,11 @@ export const layer: Layer.Layer<PeerInboundService, never, PeerInboundServiceReq
               // A withdrawal closes the debt here as it does at the origin: silently.
               ...(input.terminal?.kind === "sender-cleared" ? { injection: "none" as const } : {}),
               ...(input.senderLabel === undefined ? {} : { senderLabel: input.senderLabel }),
-              ...(input.landing === undefined
-                ? {}
-                : { mode: input.landing.mode, modeLimit: input.landing.limit }),
+              ...(input.landing !== undefined
+                ? { mode: input.landing.mode, modeLimit: input.landing.limit }
+                : input.waitsTurn === true
+                  ? { mode: "queue" as const }
+                  : {}),
               message: {
                 messageId,
                 text: input.text,
