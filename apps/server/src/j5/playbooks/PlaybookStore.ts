@@ -55,6 +55,7 @@ import {
   playbookError,
   storageError,
 } from "./definition.ts";
+import { authorizeScheduledStart } from "./scheduledStart.ts";
 export { playbookError } from "./definition.ts";
 
 import { makeAgentPersonaLibrary, personaCatalogProblem } from "../agents/agentPersonaLibrary.ts";
@@ -1653,6 +1654,8 @@ const buildPlaybookStore = Effect.gen(function* () {
           folders: folders.map(({ source, path, issue }) => ({ source, path, issue })),
         })),
       ),
+    authorizeScheduledStart: (taskId: string, name: string) =>
+      authorizeScheduledStart(taskId, name).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
     saveDefinition: (input: PlaybookSaveRequest) =>
       library.save(input).pipe(permit.withPermits(1), Effect.tap(bumpRevision)),
     saveDefinitionFromTurn: Effect.fn("PlaybookStore.saveDefinitionFromTurn")(

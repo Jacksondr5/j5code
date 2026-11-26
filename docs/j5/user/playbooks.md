@@ -86,16 +86,20 @@ Add `approval: required` to a step when each run needs a person's sign-off befor
 
 Approval permits the owner's next move; it does not move the run automatically or replace Crew, persona, or tool permissions. Going back onto an approved step asks again. Revisions must keep each required checkpoint and its step ID. Submitting a different summary opens a fresh request. Changing that step's saved work invalidates its approval; changing only its holder does not. Cancelling the run or removing its owner closes any pending request. A one-off “show me first” can remain an instruction to the agent without changing the reusable playbook.
 
-Type `/playbook ` to choose a registered playbook, then send the command to start it.
-Send `/playbook review` to start directly, or `/playbook` to ask what is available.
-Text after the name stays part of your message, as in
-`/playbook review, then summarize the risks`. You can also ask directly: “Start
-playbook review.” One playbook can be active per thread;
-finishing or cancelling it leaves the agent ready for other work or another playbook.
+## Starting a run
 
-Type `@playbook:` anywhere in a message to pick a playbook by name. On its own, the
-mention asks the agent to start that playbook in the thread. Invalid playbooks appear in the
-list with their error.
+Describe the work you need. Your agent can choose a playbook that clearly fits
+and tell you which one it is using. If the fit is unclear or several fit, it
+asks first. The run follows the scope and approvals of your request.
+
+To choose one yourself, use `/playbook ` at the start of a message or type
+`@playbook:` anywhere to pick a saved playbook. You can also ask directly, as
+in “Start playbook review.” Add instructions after the name when needed. For
+a scheduled task, include the playbook name in the task prompt, for example
+“Summarize the release using @playbook:review.”
+
+One playbook can be active per thread. Finishing or cancelling it makes the
+thread available for another run.
 
 Editing prompts or reordering steps in a saved playbook changes the procedure for
 future runs. The current run keeps the copy it started with, even if the saved

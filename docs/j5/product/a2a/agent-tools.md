@@ -250,7 +250,8 @@ like code-reviewer. By default the user reviews and edits the roster in this thr
 or declines. If Auto-approve new Crews is on for your project, the proposed roster is created
 immediately with no approval card. The result says whether it is open or approved; the launch report
 arrives here once creation finishes or fails. Approval creates seats without starting turns. Send
-each member its first assignment when it has work; reuse finished members for follow-up work in the
+each member its first assignment when it has work. If you own a playbook run, hand off steps to
+eligible members using the playbook tools. Reuse finished members for follow-up work in the
 same thread. On a roster the user approves, each seat keeps its configured access and tool
 approvals, which may exceed yours. You become the crew's Captain and may command several crews at
 once; later requests, stops, and archives name the crew they mean. Use j5_send_message for
@@ -408,19 +409,21 @@ stopping retires nothing.
 
 ### `j5_playbook_cancel`
 
-**Description (contract):** "Cancel your playbook first, then stop its current holder if that is another agent. Your own turn is never interrupted. The result records whether Stop was requested, unnecessary, or failed; retries do not stop again. Work and history remain. Reuse client_request_id only to retry this exact operation; use a fresh ID for each new action. Active-run retries return current live progress without moving again. After completion or cancellation, only start and finish retries are retained."
+**Description (contract):** "Cancel your run and request Stop on its current holder when another agent holds it. The result records the Stop outcome. Stop other agents you assigned with t3_thread_interrupt (stop: true) or task_cancel for delegated tasks. Report any worker the platform could not stop. Reuse client_request_id only to retry this exact operation; use a fresh ID for each new action. Active-run retries return current live progress without moving again. After completion or cancellation, only start and finish retries are retained."
 
 Cancellation preserves the run and its saved procedure in history.
 
 ### Playbook run holders
 
-The thread that starts a run owns its step pointer and is the only thread allowed to move, revise, assign, complete, or cancel it. `j5_playbook_start`, `j5_playbook_next`, and `j5_playbook_back` accept an optional `assignee` participant ID. A local, active Peer Agent spawned by the owner, or a live member of a Crew the owner captains, can hold a step. Without an assignee, the owner holds it. The holder is checked and recorded in the same transaction as the step move. Playbook steps do not belong to fixed Crew seats.
+The thread that starts a run owns its step pointer and is the only thread allowed to move, revise, assign, complete, or cancel it. `j5_playbook_start`, `j5_playbook_next`, and `j5_playbook_back` accept an optional `assignee` participant ID. A local, active Peer Agent spawned by the owner, or a live member of a Crew the owner captains, can hold a step. Without an assignee, the owner holds it when eligible. A required persona must match the holder's recorded launch assignment. The holder is checked and recorded in the same transaction as the step move. Playbook steps do not belong to fixed Crew seats.
 
-Each landing records its holder and sends that step's saved prompt to the holder's thread as a `<j5_playbook_step>` notice. The `delivery` state is `captain` for an owner-held step, `delivered` once the holder receives the notice, or `pending` while delivery is unresolved. A pending delivery does not mean the step was executed. `j5_playbook_current` reports the saved holder and delivery state without resending. Each landing has stable dispatch IDs, so a retry cannot duplicate the notice or silently change its target.
+Each landing records its holder and sends that step's saved prompt to the holder's thread as a `<j5_playbook_step>` notice. The `delivery` state is `captain` for an owner-held step, `delivered` once the holder receives the notice, or `pending` while delivery is unresolved. A required first step without an eligible holder reports `blocked` and withholds the step prompt. Use `j5_playbook_assign` to assign it once an eligible holder is available. Pending delivery describes receipt of the step prompt. `j5_playbook_current` reports the saved holder and delivery state without resending. Each landing has stable dispatch IDs, so a retry cannot duplicate the notice or silently change its target.
 
 A revision that replaces the current step accepts the same optional assignee and records its new holder atomically; without one it returns the step to the owner. A revision retaining the current step keeps its holder. When its required persona changes, the owner can name a matching assignee in the same revision.
 
 While a hand-off is pending, `j5_playbook_next`, `j5_playbook_back`, `j5_playbook_revise`, and `j5_playbook_complete` refuse with `delivery_pending`. `j5_playbook_assign(runId, expectedStepId, client_request_id, assignee?)` can reassign the current step or take it back, even if its previous delivery is stuck because a holder was archived. It atomically supersedes the old pending landing; a retry of the old request cannot revive it. `j5_playbook_cancel` remains available. The platform never advances the pointer on its own.
+
+Start reports each required persona's availability. A grouped `personaApproval` covers the launches that need model or access limits lifted. While approval is pending, the owner can use eligible existing holders and launch within its limits. The environment Owner's approval applies to the approved persona definitions for that run. A scheduled turn must name the playbook in its configured task prompt before it can start.
 
 Fleet shows the active run on its owner agent, including current step, recorded holder, and pending delivery state. It keeps a recorded holder visible if that agent becomes unavailable.
 

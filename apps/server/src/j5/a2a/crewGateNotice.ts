@@ -207,7 +207,7 @@ export const crewLaunchReportText = (input: {
     );
   if (waiting > 0)
     prose.push(
-      "Send each member its first assignment with j5_send_message when it has work; the first delivery includes the shared brief and current roster. Reuse finished members for follow-up work in the same thread.",
+      "When a member has work, send its first assignment with j5_send_message or assign a step from your playbook run with j5_playbook_assign. The first delivery includes the shared brief and current roster. Reuse finished members for follow-up work in the same thread.",
     );
   if (waiting === 0 && failed.length === 0 && notCreated.length === 0 && pending.length === 0)
     prose.push(
