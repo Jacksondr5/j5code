@@ -146,13 +146,20 @@ export const sharingAllowsStartAnywhere = (access: KnownConnectionAccess): boole
 /**
  * Whether some saved server lets this device start what `allows` asks: that server's levels and its
  * session's "Operate tasks" (`operates`) together, so one server's grant opens no other's door.
- * With no saved server nothing is refused, so upstream's doors stay as they are.
+ * A server switched off is left out, since it never answers. With no saved server switched on
+ * nothing is refused, so upstream's doors stay as they are.
  */
 export const someServerAllowsStart = (
-  servers: ReadonlyArray<{ readonly access: KnownConnectionAccess; readonly operates: boolean }>,
+  servers: ReadonlyArray<{
+    readonly access: KnownConnectionAccess;
+    readonly operates: boolean;
+    readonly enabled?: boolean;
+  }>,
   allows: (access: KnownConnectionAccess) => boolean,
-): boolean =>
-  servers.length === 0 || servers.some((server) => server.operates && allows(server.access));
+): boolean => {
+  const enabled = servers.filter((server) => server.enabled !== false);
+  return enabled.length === 0 || enabled.some((server) => server.operates && allows(server.access));
+};
 
 /**
  * Which server, if any, is asked "What should people and agents on <server> call you?" now:
