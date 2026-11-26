@@ -1239,11 +1239,13 @@ const rawLayer: Layer.Layer<
               messageId,
               text: input.message,
               ...(input.attachments === undefined ? {} : { attachments: input.attachments }),
-              ...(input.mode === undefined || input.mode === "queue"
+              ...(input.mode === undefined
                 ? {}
                 : {
                     mode: input.mode,
-                    ...(input.modeLimit === undefined ? {} : { modeLimit: input.modeLimit }),
+                    ...(input.mode === "queue" || input.modeLimit === undefined
+                      ? {}
+                      : { modeLimit: input.modeLimit }),
                   }),
               originProjectId: sender.projectId,
               receiverProjectId: receiver.projectId,

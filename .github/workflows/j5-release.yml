@@ -65,6 +65,10 @@ on:
         description: Leave the release as a draft
         type: boolean
         default: false
+    outputs:
+      published:
+        description: "'true' when the version is published, by this run or an earlier one; never for a draft"
+        value: ${{ inputs.draft != true && (jobs.resolve.outputs.published == 'true' || jobs.release.outputs.published == 'true') }}
     secrets:
       CSC_LINK:
         required: true
@@ -527,6 +531,8 @@ jobs:
     permissions:
       contents: write
       actions: read
+    outputs:
+      published: ${{ steps.publish.outputs.published }}
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
@@ -600,6 +606,7 @@ jobs:
           cat release-assets/SHA256SUMS
 
       - name: Publish GitHub release
+        id: publish
         run: |
           set -euo pipefail
           tag="v$RELEASE_VERSION"
@@ -722,6 +729,7 @@ jobs:
           else
             gh release edit "$tag" --draft=false --latest
           fi
+          echo "published=true" >> "$GITHUB_OUTPUT"
 
       # These gitlinks belong to vendored manifests, not this repository.
       # Remove them only from the disposable index before checkout's cleanup.
