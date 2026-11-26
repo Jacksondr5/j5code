@@ -1,0 +1,64 @@
+name: J5 macOS Capacity Retry
+
+# GitHub's hosted macOS arm64 pool is short (#1246): release jobs on `macos-15`
+# can wait about 15 minutes and be cancelled with "The job was not acquired by
+# Runner of type hosted even after multiple attempts". When a release run failed
+# only that way, re-run its failed jobs, wait for that attempt, and decide again,
+# up to the attempt cap in scripts/j5/macos-capacity-retry.ts. Any other failure
+# is left for a person. The whole loop stays in one job: GitHub doesn't document
+# whether an attempt re-run with GITHUB_TOKEN fires `workflow_run` again.
+
+on:
+  workflow_run:
+    # J5 Release runs on its own only when dispatched by hand; called from
+    # J5 Nightly or J5 Stable, its jobs belong to the caller's run.
+    workflows: [J5 Nightly, J5 Stable, J5 Release]
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  retry:
+    name: Re-run macOS jobs GitHub didn't pick up
+    if: >-
+      github.repository == 'Jacksondr5/j5code' &&
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.event != 'pull_request'
+    runs-on: ubuntu-24.04
+    # If a re-run attempt does fire `workflow_run`, its job waits here, then finds
+    # the run already handled and does nothing.
+    concurrency:
+      group: j5-macos-capacity-retry-${{ github.event.workflow_run.id }}
+      cancel-in-progress: false
+    # Up to four re-runs, each waited on through the macOS jobs and the release
+    # (about 20-60 minutes), inside GitHub's 6-hour job limit.
+    timeout-minutes: 300
+    permissions:
+      actions: write
+      checks: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+
+      - name: Re-run the failed jobs while only capacity failed them
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+        run: node scripts/j5/macos-capacity-retry.ts "$RUN_ID" --rerun --event-attempt "$RUN_ATTEMPT"
+
+      - name: Exclude vendored gitlinks from checkout cleanup
+        if: always()
+        run: |
+          python3 - <<'PYTHON'
+          import subprocess
+          entries = subprocess.check_output(["git", "ls-files", "--stage", "-z", ".repos"])
+          paths = [entry.split(b"\t", 1)[1] for entry in entries.split(b"\0") if entry.startswith(b"160000 ")]
+          if paths:
+              subprocess.run(["git", "update-index", "--force-remove", "-z", "--stdin"], input=b"\0".join(paths) + b"\0", check=True)
+          PYTHON
