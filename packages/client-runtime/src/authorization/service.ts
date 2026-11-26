@@ -39,6 +39,7 @@ import * as ManagedRelay from "../relay/managedRelay.ts";
 import * as TokenStore from "./tokenStore.ts";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
+import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
@@ -291,6 +292,10 @@ export const make = Effect.gen(function* () {
         accessToken: token.accessToken,
         createProof: (proof) =>
           signer.createProof(proof).pipe(
+            // J5 diagnostic (#1230), not for merge: what the proof really failed on.
+            Effect.tapCause((cause) =>
+              Effect.sync(() => console.warn("J5 #1230 proof failed", Cause.pretty(cause))),
+            ),
             Effect.mapError(
               () =>
                 new ConnectionBlockedError({
@@ -635,6 +640,10 @@ export const make = Effect.gen(function* () {
             signer
               .createProof(proof)
               .pipe(
+                // J5 diagnostic (#1230), not for merge: what the proof really failed on.
+                Effect.tapCause((cause) =>
+                  Effect.sync(() => console.warn("J5 #1230 proof failed", Cause.pretty(cause))),
+                ),
                 Effect.mapError(
                   proofError(msg("Could not create the websocket authorization proof.")),
                 ),
