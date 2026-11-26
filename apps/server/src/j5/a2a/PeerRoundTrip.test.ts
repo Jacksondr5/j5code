@@ -451,7 +451,7 @@ it.effect(
 );
 
 it.effect(
-  "carries a steer across with its sender's limit, and refuses it for an agent above that limit",
+  "carries a steer across with its sender's limit and a queue without one, and refuses a steer for an agent above that limit",
   () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -490,6 +490,26 @@ it.effect(
         const steered = (yield* Ref.get(homeDelivered)).at(-1);
         assert.equal(steered?.mode, "steer", "Home lands it as Work's agent asked");
         assert.deepStrictEqual(steered?.modeLimit, limit);
+
+        // An asked-for queue crosses too, without a limit: a message that waits touches no turn.
+        yield* workServer.send.send({
+          commandId: CommCommandId.make("command:roundtrip:queue"),
+          senderThreadId: work.agent.threadId,
+          to: home.agent.id,
+          message: "Once you're done, look at the migration.",
+          mode: "queue",
+          acceptedAt: timestamp,
+        });
+        assert.equal((yield* workServer.worker.runOnce)?.state, "delivered");
+        const queuedBody = (yield* Ref.get(crossed)).at(-1)?.body;
+        assert.isTrue(queuedBody?.waitsTurn);
+        assert.isUndefined(queuedBody?.landing);
+        assert.equal((yield* homeServer.worker.runOnce)?.state, "delivered");
+        assert.equal(
+          (yield* Ref.get(homeDelivered)).at(-1)?.mode,
+          "queue",
+          "Home waits for the turn as Work's agent asked",
+        );
 
         // Home's agent is raised above what Work's agent may touch: the restart is refused,
         // and nothing is recorded or delivered on Home.
@@ -532,7 +552,11 @@ it.effect(
           "Send it again without mode",
         );
         assert.equal(yield* homeServer.worker.runOnce, null, "Home has nothing to deliver");
-        assert.lengthOf(yield* Ref.get(homeDelivered), 2, "the ask and the steer, and no restart");
+        assert.lengthOf(
+          yield* Ref.get(homeDelivered),
+          3,
+          "the ask, the steer and the queue, and no restart",
+        );
       }),
     ),
 );
