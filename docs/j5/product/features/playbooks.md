@@ -41,6 +41,8 @@ Playbooks are linear sequences. The initiative-level view — a plan whose nodes
 16. Copying a definition between environments creates an independent copy without replacing an existing different definition.
 17. An agent can edit a library definition; the edit is refused if the definition changed since the agent read it.
 
+18. On the user's explicit request or approved proposal, the owner can revise an active run's steps without changing the reusable definition or other runs. The run records each revision's basis, time, and owner; history shows its revision count and latest basis. A revision preserves the current step by stable ID or requires an explicit replacement step, and stale calls and retries cannot apply it twice.
+
 ## Scenarios
 
 - **A release Playbook.** The user writes a five-step release Playbook whose steps name the Builder and the Sitter, and launches a Crew in Website Redesign that follows it. The Fleet page shows "Step 2 of 5 · builder". When the Builder reports step 2 done, the Captain advances, and the Sitter's next turn opens with step 3's instructions; an unowned step is the Captain's. (AC2, AC3, AC5, AC6)
@@ -61,3 +63,5 @@ Playbooks are linear sequences. The initiative-level view — a plan whose nodes
 - 2026-10-19 — an environment-wide library and configured folders join workspace discovery, with a project's own definitions winning inside it; independent copies between environments; agents edit library definitions against the version they read (AC13–AC17, [#613](https://github.com/Jacksondr5/j5code/issues/613)).
 - 2026-11-06 — a playbook Crew gets a stand-in seat only for a persona the server doesn't have; a disabled, invalid or blocked persona keeps its steps with the Captain, who escalates it (Bryant; [#785](https://github.com/Jacksondr5/j5code/issues/785)).
 - 2026-11-24 — Each new run snapshots its definition. Upgrade cancels active runs without a snapshot and preserves terminal history ([#795](https://github.com/Jacksondr5/j5code/issues/795)).
+
+- 2026-11-24 — Owners can revise the steps of an active run. Run history records the revision count and latest reason ([#787](https://github.com/Jacksondr5/j5code/issues/787)).

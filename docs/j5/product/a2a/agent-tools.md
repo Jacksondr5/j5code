@@ -443,7 +443,7 @@ is `delivered` (the seat has the step), `captain` (the Captain does it from `cur
 or `pending` (the hand-off hasn't finished; nobody should start the step). Only `captain` means
 the Captain does it. `j5_playbook_current` reports the same `delivery` without handing off again.
 While an earlier hand-off is still pending, `j5_playbook_next`, `j5_playbook_back`,
-and `j5_playbook_complete` refuse with `delivery_pending` and don't move; retry the same call. Nothing
+`j5_playbook_revise`, and `j5_playbook_complete` refuse with `delivery_pending` and don't move; retry the same call. Nothing
 retries a pending hand-off in the background, including after a restart: the Captain's next step
 call, or a retry of the same one, finishes it.
 `j5_playbook_cancel` always works. The platform never advances on its own: the Captain calls
@@ -518,6 +518,8 @@ run; `j5_stop_crew` doesn't, and unarchiving doesn't restart it.
 44. A persona an agent picks, by `j5_spawn_agent`, `delegate_task`, an auto-approved roster or a Captain's addition, uses only entries the lists check and is refused when its access is broader than the caller's effective sandbox, with one refusal (`access-above-caller`) naming both levels on every path. A persona the person picked (an `@persona:` mention in the message that started the turn, the composer, or a roster card they approve) is held to neither. Every persona assignment records who picked it.
 
 ## History
+
+- 2026-11-24 — Added `j5_playbook_revise` for user-requested changes to an active run ([#787](https://github.com/Jacksondr5/j5code/issues/787)).
 
 - 2026-08-29 — contracts adopted: descriptions as part of the contract, the toolsmith rule, single-target stop and archive, the confirmation-token archive ([record](../../worklog/2026-08-29-substrate-session.md)).
 - 2026-08-30 — the spawn brief carries the task and the reply expectation; one sentence of brief steering in `spawn_agent` ([record](../../worklog/2026-08-30-spawning-guide-session.md)).

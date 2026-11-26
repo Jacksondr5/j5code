@@ -89,12 +89,34 @@ export class PlaybookError extends Schema.TaggedError<PlaybookError>()("Playbook
   availableStepIds: Schema.Array(Schema.String),
 }) {}
 
+export const PlaybookRevision = Schema.Struct({
+  basis: Schema.Literals(["asked", "approved"]),
+  revisedAt: Text,
+  ownerThreadId: ThreadId,
+  fromStepId: Text,
+  toStepId: Text,
+  stepsDigest: PlaybookDigest,
+});
+export type PlaybookRevision = typeof PlaybookRevision.Type;
+
+export const PlaybookReviseRequest = Schema.Struct({
+  runId: Text,
+  expectedStepId: Text,
+  steps: PlaybookDefinition.fields.steps,
+  basis: PlaybookRevision.fields.basis,
+  stepId: Schema.optionalKey(Text),
+  client_request_id: Text,
+});
+export type PlaybookReviseRequest = typeof PlaybookReviseRequest.Type;
+
 export const PlaybookRun = Schema.Struct({
   runId: Text,
   ownerThreadId: ThreadId,
   definitionPath: Text,
   currentStepId: Text,
   cancelReason: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  revisionCount: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+  latestRevision: Schema.optionalKey(Schema.NullOr(PlaybookRevision)),
   status: Schema.Literals(["active", "completed", "cancelled"]),
   createdAt: Text,
   updatedAt: Text,

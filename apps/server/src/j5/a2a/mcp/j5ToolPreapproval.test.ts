@@ -64,6 +64,7 @@ it("names exactly the J5 verbs plus the artifact, Subagent and interrupt verbs",
       "j5_playbook_back",
       "j5_playbook_complete",
       "j5_playbook_cancel",
+      "j5_playbook_revise",
     ],
   );
 });

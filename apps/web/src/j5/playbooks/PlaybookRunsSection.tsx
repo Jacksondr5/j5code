@@ -142,6 +142,9 @@ function PlaybookRunCard({
       <p className="mt-1 text-xs text-muted-foreground">
         Updated <time dateTime={run.updatedAt}>{age === "just now" ? age : `${age} ago`}</time>
       </p>
+      {display.revisionHistory && (
+        <p className="mt-1 text-xs text-muted-foreground">{display.revisionHistory}</p>
+      )}
       {run.cancelReason && (
         <p role="status" className="mt-3 text-sm text-warning">
           {run.cancelReason}
