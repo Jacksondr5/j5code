@@ -15,7 +15,7 @@ module.exports = async ({ appOutDir, electronPlatformName, arch, packager }) => 
     console.log("[server-compile-cache] Skipping untrusted bundle");
     return;
   }
-  // J5 (FORK.md case 132): J5's native Windows build skips the cache, as upstream's cross-build does.
+  // J5 (FORK.md case 131): J5's native Windows build skips the cache, as upstream's cross-build does.
   if (process.env.J5_SKIP_SERVER_COMPILE_CACHE === "true") {
     console.log("[server-compile-cache] Skipping J5 build (J5_SKIP_SERVER_COMPILE_CACHE)");
     return;

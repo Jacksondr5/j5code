@@ -178,6 +178,17 @@ instead.
 Start with one server and one Mac. A nightly that changes the client-server or peer protocol splits
 a mixed fleet until every machine has moved.
 
+### macOS jobs GitHub doesn't pick up
+
+GitHub's hosted macOS arm64 runners are sometimes short, and a macOS job is cancelled with "The job
+was not acquired by Runner of type hosted even after multiple attempts". When a J5 Nightly, J5
+Stable or J5 Release run fails only that way, `J5 macOS Capacity Retry` re-runs its failed jobs, up
+to five attempts in all. If any other job failed, it leaves the run alone.
+
+When a run stays failed, its `J5 macOS Capacity Retry` run says why: "reached the cap of 5" when
+GitHub kept not picking the jobs up, or the job that failed on its own. Re-run the failed jobs by
+hand once the runners recover, or fix the failure first.
+
 ### Going back to an older build
 
 The policy is to roll forward: a broken nightly is fixed by the next nightly. This section is for
