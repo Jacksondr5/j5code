@@ -1,0 +1,8 @@
+{
+	admin off
+	skip_install_trust
+}
+
+{$J5_CONNECT_HOST} {
+	reverse_proxy 127.0.0.1:5556
+}

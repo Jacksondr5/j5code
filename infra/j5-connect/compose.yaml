@@ -1,0 +1,58 @@
+services:
+  connect:
+    build: .
+    init: true
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      J5_CONNECT_ISSUER: ${J5_CONNECT_ISSUER:-}
+      J5_CONNECT_PROVIDER: ${J5_CONNECT_PROVIDER:-oidc}
+      J5_CONNECT_OIDC_GET_USER_INFO: ${J5_CONNECT_OIDC_GET_USER_INFO-true}
+      J5_CONNECT_OIDC_SCOPES: ${J5_CONNECT_OIDC_SCOPES:-}
+      J5_CONNECT_UPSTREAM_ISSUER: ${J5_CONNECT_UPSTREAM_ISSUER:-}
+      J5_CONNECT_UPSTREAM_CLIENT_ID: ${J5_CONNECT_UPSTREAM_CLIENT_ID:-}
+      J5_CONNECT_UPSTREAM_CLIENT_SECRET: ${J5_CONNECT_UPSTREAM_CLIENT_SECRET:-}
+      J5_CONNECT_CLIENTS: ${J5_CONNECT_CLIENTS:-}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+      DEX_SESSIONS_ENABLED: "false"
+    ports:
+      - "80:80"
+      - "443:443"
+    sysctls:
+      net.ipv4.ip_unprivileged_port_start: "0"
+    volumes:
+      - caddy-data:/data
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "-q",
+          "-O",
+          "/dev/null",
+          "http://127.0.0.1:5556/.well-known/openid-configuration",
+        ]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+
+  postgres:
+    image: postgres:17.10-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: connect
+      POSTGRES_DB: connect
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "connect", "-d", "connect"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+
+volumes:
+  caddy-data:
+  postgres-data:

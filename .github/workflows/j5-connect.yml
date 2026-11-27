@@ -1,0 +1,38 @@
+name: J5 Connect
+
+on:
+  pull_request:
+    paths:
+      - infra/j5-connect/**
+      - .github/workflows/j5-connect.yml
+  push:
+    branches: [j5/main]
+    paths:
+      - infra/j5-connect/**
+      - .github/workflows/j5-connect.yml
+
+permissions:
+  contents: read
+
+jobs:
+  offboarding:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: infra/j5-connect
+    env:
+      COMPOSE_FILE: compose.yaml:compose.test.yaml
+      COMPOSE_PROFILES: test
+      COMPOSE_PROJECT_NAME: j5-connect-ci
+    steps:
+      - uses: actions/checkout@v6
+      - name: Check Dex configuration
+        run: python3 test/check_config.py
+      - name: Start Connect and the test identity provider
+        run: docker compose up --build --wait --wait-timeout 60
+      - name: Prove refresh refusal after upstream deletion
+        run: python3 test/offboarding.py docker compose
+      - name: Remove the test stack
+        if: always()
+        run: docker compose down --volumes

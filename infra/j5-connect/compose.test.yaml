@@ -1,0 +1,93 @@
+services:
+  connect:
+    restart: "no"
+    depends_on:
+      upstream:
+        condition: service_healthy
+    environment:
+      J5_CONNECT_ISSUER: https://localhost:${J5_CONNECT_TEST_HTTPS_PORT:-8443}
+      J5_CONNECT_PROVIDER: oidc
+      J5_CONNECT_OIDC_SCOPES: ""
+      J5_CONNECT_TEST_PROFILE: "true"
+      J5_CONNECT_UPSTREAM_ISSUER: http://upstream.localhost:${J5_CONNECT_TEST_UPSTREAM_PORT:-5557}
+      J5_CONNECT_UPSTREAM_CLIENT_ID: connect-fixture
+      J5_CONNECT_UPSTREAM_CLIENT_SECRET: fixture-upstream-secret
+      J5_CONNECT_CLIENTS: >-
+        [{"id":"j5-fixture","name":"J5 test server","secret":"fixture-j5-secret",
+          "redirectURIs":["http://localhost/callback"]}]
+      POSTGRES_PASSWORD: fixture-postgres-password
+    ports: !override
+      - "127.0.0.1:${J5_CONNECT_TEST_HTTPS_PORT:-8443}:443"
+
+    healthcheck:
+      test:
+        - CMD
+        - python3
+        - -c
+        - >-
+          import ssl, urllib.request;
+          context = ssl.create_default_context(cafile="/data/caddy/pki/authorities/local/root.crt");
+          urllib.request.urlopen("https://localhost/.well-known/openid-configuration", context=context, timeout=1).close()
+
+  postgres:
+    restart: "no"
+    environment:
+      POSTGRES_PASSWORD: fixture-postgres-password
+    volumes:
+      - ./test/upstream.sql:/docker-entrypoint-initdb.d/upstream.sql:ro
+
+  upstream:
+    profiles: [test]
+    image: ghcr.io/dexidp/dex:v2.46.1@sha256:65b72ca0f4b0bf6d4ada84ec21da8851782563404ac7b8f926923d27ceced9ab
+    command: ["dex", "serve", "/test-dex.yaml"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DEX_SESSIONS_ENABLED: "false"
+      DEX_EXPAND_ENV: "false"
+    configs:
+      - source: upstream
+        target: /test-dex.yaml
+    ports:
+      - "127.0.0.1:${J5_CONNECT_TEST_UPSTREAM_PORT:-5557}:${J5_CONNECT_TEST_UPSTREAM_PORT:-5557}"
+    networks:
+      default:
+        aliases: [upstream.localhost]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "-q",
+          "-O",
+          "/dev/null",
+          "http://127.0.0.1:${J5_CONNECT_TEST_UPSTREAM_PORT:-5557}/.well-known/openid-configuration",
+        ]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+
+configs:
+  upstream:
+    content: |
+      issuer: http://upstream.localhost:${J5_CONNECT_TEST_UPSTREAM_PORT:-5557}
+      storage:
+        type: postgres
+        config:
+          host: postgres
+          database: upstream
+          user: connect
+          password: fixture-postgres-password
+          ssl:
+            mode: disable
+      web:
+        http: 0.0.0.0:${J5_CONNECT_TEST_UPSTREAM_PORT:-5557}
+      oauth2:
+        skipApprovalScreen: true
+      enablePasswordDB: true
+      staticClients:
+        - id: connect-fixture
+          name: J5 Connect
+          secret: fixture-upstream-secret
+          redirectURIs: [https://localhost:${J5_CONNECT_TEST_HTTPS_PORT:-8443}/callback]

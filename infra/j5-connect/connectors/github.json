@@ -1,0 +1,10 @@
+{
+  "type": "github",
+  "id": "github",
+  "name": "GitHub",
+  "config": {
+    "clientID": "$J5_CONNECT_UPSTREAM_CLIENT_ID",
+    "clientSecret": "$J5_CONNECT_UPSTREAM_CLIENT_SECRET",
+    "redirectURI": "$J5_CONNECT_CALLBACK"
+  }
+}
