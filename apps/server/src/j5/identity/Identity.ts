@@ -20,6 +20,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Ref from "effect/Ref";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as HttpClient from "effect/http/HttpClient";
@@ -101,21 +102,22 @@ export class SignInExpiredError extends Schema.TaggedError<SignInExpiredError>()
   }
 }
 
+/** The J5 Connect sent the browser back to another address than the sign-in started at. */
+export class SignInElsewhereError extends Schema.TaggedError<SignInElsewhereError>()(
+  "SignInElsewhereError",
+  {},
+) {
+  override get message(): string {
+    return "This sign-in came back to a different address than it started at. Start it again.";
+  }
+}
+
 export class AccountNotFoundError extends Schema.TaggedError<AccountNotFoundError>()(
   "AccountNotFoundError",
   { accountId: Schema.String },
 ) {
   override get message(): string {
-    return "That account has not signed in to this server, or its request is gone.";
-  }
-}
-
-export class AccountAlreadyBoundError extends Schema.TaggedError<AccountAlreadyBoundError>()(
-  "AccountAlreadyBoundError",
-  {},
-) {
-  override get message(): string {
-    return "That account is already someone's on this server. Unbind it first.";
+    return "That account isn't waiting to be let in: it was decided, it expired, or it signed in elsewhere.";
   }
 }
 
@@ -173,11 +175,16 @@ export type SignInOutcome =
 
 const CLIENT_SECRET_NAME = "j5-connect-client-secret";
 const SIGN_IN_LIFETIME = Duration.minutes(10);
-/** A request for access is shown to Owners this long; a later sign-in asks again. */
+/**
+ * A request is shown to Owners this long. A declined or expired one answers "not let in" for as
+ * long again, and only then does a sign-in ask afresh.
+ */
 const REQUEST_LIFETIME = Duration.days(7);
 /** An account J5 Connect has not confirmed for this long loses its sign-in sessions. */
 const CONFIRMATION_LAPSE = Duration.hours(24);
 const CONFIRMATION_INTERVAL = Duration.hours(1);
+/** Refreshes run side by side, each bounded on its own, so one slow account holds up none. */
+const REFRESH_CONCURRENCY = 4;
 
 const StoredUrls = Schema.fromJsonString(Schema.Array(Schema.String));
 const decodeUrls = Schema.decodeUnknownOption(StoredUrls);
@@ -228,20 +235,22 @@ export class Identity extends Context.Service<
       string,
       IdentityNotJoinedError | AddressNotRegisteredError | Oidc.OidcError | IdentityStorageError
     >;
-    /** Finishes a sign-in the J5 Connect sent back. */
+    /** Finishes a sign-in the J5 Connect sent back to `origin`, the address it started at. */
     readonly completeSignIn: (input: {
       readonly state: string;
       readonly code: string;
+      readonly origin: string;
     }) => Effect.Effect<
       SignInOutcome,
       | IdentityNotJoinedError
       | SignInExpiredError
+      | SignInElsewhereError
       | Oidc.OidcError
       | IdentityStorageError
       | ServerSecretStore.SecretStoreError
       | Effect.Error<ReturnType<typeof mintPairingCredential>>
     >;
-    /** Lets in an account that is no one yet, as a new person at a scope and level. */
+    /** Lets in an account that is waiting, as a new person at a scope and level. */
     readonly grant: (input: {
       readonly accountId: string;
       readonly name: string;
@@ -250,38 +259,34 @@ export class Identity extends Context.Service<
     }) => Effect.Effect<
       ParticipantId,
       | AccountNotFoundError
-      | AccountAlreadyBoundError
       | IdentityStorageError
       | Effect.Error<ReturnType<typeof checkedPersonName>>
       | Effect.Error<ReturnType<PersonAccess["Service"]["createPerson"]>>
       | Effect.Error<ReturnType<Access["Service"]["setLevel"]>>
       | Effect.Error<ReturnType<typeof requireScope>>
     >;
-    /** Says an account is someone already on the server. */
+    /** Says an account that is waiting is someone already on the server. */
     readonly bind: (input: {
       readonly accountId: string;
       readonly personId: string;
     }) => Effect.Effect<
       void,
       | AccountNotFoundError
-      | AccountAlreadyBoundError
       | PersonAlreadyBoundError
       | IdentityPersonNotFoundError
       | IdentityStorageError
     >;
     readonly decline: (
       accountId: string,
-    ) => Effect.Effect<
-      void,
-      AccountNotFoundError | AccountAlreadyBoundError | IdentityStorageError
-    >;
+    ) => Effect.Effect<void, AccountNotFoundError | IdentityStorageError>;
     /** Cuts a person loose from their account, ending the sessions that came from its sign-in. */
     readonly unbind: (personId: string) => Effect.Effect<void, PersonNotBoundError | ChangeFailure>;
     /**
-     * Refreshes every bound account through the J5 Connect, then ends the sign-in sessions of
-     * each not confirmed for a day. Run each hour.
+     * Refreshes every bound account through the J5 Connect, then ends the sign-in of each not
+     * confirmed for a day, so long as J5 Connect answered this pass or has not answered for a
+     * day of passes. Run each hour.
      */
-    readonly confirmAll: Effect.Effect<void, ChangeFailure | ServerSecretStore.SecretStoreError>;
+    readonly confirmAll: Effect.Effect<void, IdentityStorageError>;
   }
 >()("t3/j5/identity/Identity") {}
 
@@ -314,6 +319,24 @@ const toConnect = (row: ConnectRow): JoinedConnect => ({
 });
 
 const callbackUrl = (origin: string) => `${origin}${J5_IDENTITY_CALLBACK_PATH}`;
+
+const addIso = (iso: string, duration: Duration.Duration) =>
+  DateTime.formatIso(
+    DateTime.add(DateTime.makeUnsafe(iso), { milliseconds: Duration.toMillis(duration) }),
+  );
+
+/**
+ * Where an account stands as a request, read at `now`: waiting for an Owner, decided (declined,
+ * or expired undecided, which counts as declined when it expired), or neither.
+ */
+const requestStanding = (account: AccountRow, now: string) => {
+  if (account.person_id !== null && account.person_removed !== 1) return "bound" as const;
+  if (account.person_id !== null || account.requested_at === null) return "none" as const;
+  const expiresAt = addIso(account.requested_at, REQUEST_LIFETIME);
+  const decidedAt = account.declined_at ?? (expiresAt <= now ? expiresAt : null);
+  if (decidedAt === null) return "waiting" as const;
+  return addIso(decidedAt, REQUEST_LIFETIME) > now ? ("not-let-in" as const) : ("none" as const);
+};
 
 /**
  * The addresses this server is reached at, as origins: its loopback address, the LAN and tailnet
@@ -352,7 +375,11 @@ const make = Effect.gen(function* () {
   const httpClient = yield* HttpClient.HttpClient;
   const config = yield* ServerConfig.ServerConfig;
   const directEndpoints = yield* Effect.serviceOption(DirectEndpoints.DirectEndpoints);
-  const peopleChanged = (yield* ReadChanges).notify("sharing");
+  // A request waits in its Owners' Inbox as well as on the People page.
+  const peopleChanged = (yield* ReadChanges).notify("sharing", "inbox");
+  // Since when J5 Connect has given no answer at all, counted across passes, not wall time, so
+  // a laptop waking from a long sleep is not taken for a day-long outage.
+  const unreachableSince = yield* Ref.make<string | null>(null);
   const storage = (operation: string) => (cause: unknown) =>
     new IdentityStorageError({ operation, cause });
   const nowIso = DateTime.now.pipe(Effect.map(DateTime.formatIso));
@@ -415,30 +442,55 @@ const make = Effect.gen(function* () {
   const readAccount = (accountId: string) =>
     sql<AccountRow>`${selectAccounts} WHERE account.account_id = ${accountId}`.pipe(
       Effect.map((rows) => rows[0] ?? null),
-      Effect.mapError(storage("read an account")),
     );
 
+  /** An account's request, read inside the decision's transaction; refused unless it waits. */
+  const waitingRequest = Effect.fn("j5.identity.waitingRequest")(function* (accountId: string) {
+    const account = yield* readAccount(accountId);
+    if (account === null || requestStanding(account, yield* nowIso) !== "waiting") {
+      return yield* new AccountNotFoundError({ accountId });
+    }
+    return account;
+  });
+
   /**
-   * Ends every session that came from an account's sign-in, through the gate's revoke, which ends
-   * a device key's other sessions too and closes open sockets; and revokes the credentials a
-   * sign-in minted that no device has exchanged yet.
+   * Ends what the sign-ins `which` names left behind: each session, through the gate's revoke of
+   * that one session, which closes its sockets and leaves a device key's other sessions alone;
+   * and each credential a sign-in minted that no device has exchanged yet. Run after the change
+   * that stops them pairing or renewing has committed, so nothing new can start meanwhile.
    */
-  const endSignIn = Effect.fn("j5.identity.endSignIn")(function* (accountId: string) {
-    const sessions = yield* sql<{ readonly session_id: AuthSessionId }>`
-      SELECT session_id FROM j5_a2a_person_session WHERE sign_in_account_id = ${accountId}
-    `.pipe(Effect.mapError(storage("read the sessions an account signed in")));
+  const endSignIn = Effect.fn("j5.identity.endSignIn")(function* (
+    which: { readonly accountId: string } | { readonly every: true },
+  ) {
+    const sessions = yield* (
+      "every" in which
+        ? sql<{ readonly session_id: AuthSessionId }>`
+            SELECT session_id FROM j5_a2a_person_session WHERE sign_in_account_id IS NOT NULL
+          `
+        : sql<{ readonly session_id: AuthSessionId }>`
+            SELECT session_id FROM j5_a2a_person_session
+            WHERE sign_in_account_id = ${which.accountId}
+          `
+    ).pipe(Effect.mapError(storage("read the sessions from sign-in")));
     const stillLive: Array<string> = [];
     let firstCause: unknown;
     for (const { session_id: sessionId } of sessions) {
-      const ended = yield* Effect.result(auth.revokeClient(sessionId));
+      const ended = yield* Effect.result(auth.revokeSession(sessionId));
       if (ended._tag === "Failure") {
         stillLive.push(sessionId);
         firstCause ??= ended.failure;
       }
     }
-    const waiting = yield* sql<{ readonly pairing_link_id: string }>`
-      SELECT pairing_link_id FROM j5_a2a_pairing_intent WHERE sign_in_account_id = ${accountId}
-    `.pipe(Effect.mapError(storage("read an account's waiting sign-ins")));
+    const waiting = yield* (
+      "every" in which
+        ? sql<{ readonly pairing_link_id: string }>`
+            SELECT pairing_link_id FROM j5_a2a_pairing_intent WHERE sign_in_account_id IS NOT NULL
+          `
+        : sql<{ readonly pairing_link_id: string }>`
+            SELECT pairing_link_id FROM j5_a2a_pairing_intent
+            WHERE sign_in_account_id = ${which.accountId}
+          `
+    ).pipe(Effect.mapError(storage("read the waiting sign-ins")));
     for (const credential of waiting) {
       yield* grants
         .revoke(credential.pairing_link_id)
@@ -452,12 +504,8 @@ const make = Effect.gen(function* () {
     }
   });
 
-  /** Forgets every account and sign-in, after ending what came from them. */
+  /** Forgets every account and sign-in, then ends what came from them. */
   const clearAccounts = Effect.fn("j5.identity.clearAccounts")(function* () {
-    const accounts = yield* sql<{ readonly account_id: string }>`
-      SELECT account_id FROM j5_identity_account
-    `.pipe(Effect.mapError(storage("read the accounts")));
-    for (const account of accounts) yield* endSignIn(account.account_id);
     yield* committed(
       "forget the accounts",
       Effect.gen(function* () {
@@ -465,17 +513,25 @@ const make = Effect.gen(function* () {
         yield* sql`DELETE FROM j5_identity_sign_in`;
       }),
     );
+    yield* endSignIn({ every: true });
   });
 
   const leave: Identity["Service"]["leave"] = Effect.gen(function* () {
-    yield* clearAccounts();
-    yield* sql`DELETE FROM j5_identity_connect`.pipe(Effect.mapError(storage("leave J5 Connect")));
+    yield* committed(
+      "leave J5 Connect",
+      Effect.gen(function* () {
+        yield* sql`DELETE FROM j5_identity_account`;
+        yield* sql`DELETE FROM j5_identity_sign_in`;
+        yield* sql`DELETE FROM j5_identity_connect`;
+      }),
+    );
+    yield* endSignIn({ every: true });
     yield* secrets.remove(CLIENT_SECRET_NAME);
     yield* peopleChanged;
   }).pipe(Effect.withSpan("j5.identity.leave"));
 
   const requestsAndAccounts = Effect.fn("j5.identity.requestsAndAccounts")(function* () {
-    const since = yield* ago(REQUEST_LIFETIME);
+    const now = yield* nowIso;
     const rows = yield* sql<AccountRow & { readonly person_name: string | null }>`
       SELECT account.account_id, account.issuer, account.subject, account.email, account.name,
         account.person_id, person.removed_at IS NOT NULL AS person_removed,
@@ -488,22 +544,18 @@ const make = Effect.gen(function* () {
     const accounts: Array<BoundAccount> = [];
     const requests: Array<AccessRequest> = [];
     for (const row of rows) {
-      if (row.person_id !== null && row.person_removed !== 1) {
+      const standing = requestStanding(row, now);
+      if (standing === "bound") {
         accounts.push({
           accountId: row.account_id,
-          personId: row.person_id,
+          personId: row.person_id!,
           personName: row.person_name,
           email: row.email,
           name: row.name,
           lastConfirmedAt:
             row.last_confirmed_at === null ? null : DateTime.makeUnsafe(row.last_confirmed_at),
         });
-      } else if (
-        row.person_id === null &&
-        row.requested_at !== null &&
-        row.declined_at === null &&
-        row.requested_at > since
-      ) {
+      } else if (standing === "waiting") {
         // A suggestion by name only: someone here with that name and no account of their own.
         const suggested =
           row.name === null
@@ -520,7 +572,7 @@ const make = Effect.gen(function* () {
           accountId: row.account_id,
           email: row.email,
           name: row.name,
-          requestedAt: DateTime.makeUnsafe(row.requested_at),
+          requestedAt: DateTime.makeUnsafe(row.requested_at!),
           suggested:
             suggested[0] === undefined
               ? null
@@ -531,24 +583,81 @@ const make = Effect.gen(function* () {
     return { accounts, requests };
   });
 
-  /** Ends an account's sign-in for good: its sessions, its refresh token, its MCP clients. */
-  const lapse = Effect.fn("j5.identity.lapse")(function* (account: {
-    readonly account_id: string;
-    readonly person_id: string;
-  }) {
+  /**
+   * Ends an account's sign-in for good, in an order that can be picked up again: first the mark
+   * that stops its sessions pairing or renewing, then its sessions, then its MCP clients, and
+   * last its refresh token, which is what takes it out of the next pass's sweep.
+   */
+  const lapse = Effect.fn("j5.identity.lapse")(function* (
+    account: { readonly account_id: string; readonly person_id: string },
+    cutoff: string,
+  ) {
+    const marked = yield* sql`
+      UPDATE j5_identity_account SET sign_in_ended_at = COALESCE(sign_in_ended_at, ${yield* nowIso})
+      WHERE account_id = ${account.account_id} AND person_id = ${account.person_id}
+        AND (last_confirmed_at IS NULL OR last_confirmed_at <= ${cutoff})
+      RETURNING account_id
+    `.pipe(Effect.mapError(storage("end a lapsed account's sign-in")));
+    // Confirmed or signed in again since it was read.
+    if (marked.length === 0) return;
     yield* Effect.logInfo("J5 Connect has not confirmed an account for a day; ending its sign-in", {
       accountId: account.account_id,
     });
-    yield* endSignIn(account.account_id);
-    yield* sql`
-      UPDATE j5_identity_account SET refresh_token = NULL WHERE account_id = ${account.account_id}
-    `.pipe(Effect.mapError(storage("forget a lapsed account's refresh token")));
+    yield* endSignIn({ accountId: account.account_id });
     yield* access.endMcpApprovals(ParticipantId.make(account.person_id));
+    yield* sql`
+      UPDATE j5_identity_account SET refresh_token = NULL
+      WHERE account_id = ${account.account_id} AND sign_in_ended_at IS NOT NULL
+    `.pipe(Effect.mapError(storage("forget a lapsed account's refresh token")));
   });
 
-  const confirmAll: Identity["Service"]["confirmAll"] = Effect.gen(function* () {
-    const connect = yield* readConnect;
-    if (connect === null) return;
+  /** Refreshes one account; its own failure is logged and leaves the others alone. */
+  const confirmOne = Effect.fn("j5.identity.confirmOne")(function* (
+    connect: ConnectRow,
+    discovery: Oidc.Discovery,
+    secret: string,
+    account: {
+      readonly account_id: string;
+      readonly subject: string;
+      readonly refresh_token: string;
+    },
+  ) {
+    const refreshed = yield* withHttp(
+      Oidc.refresh({
+        discovery,
+        clientId: connect.client_id,
+        clientSecret: secret,
+        refreshToken: account.refresh_token,
+        subject: account.subject,
+        nowMillis: yield* nowMillis,
+      }),
+    ).pipe(Effect.result);
+    if (refreshed._tag === "Failure") {
+      yield* Effect.logWarning("J5 Connect did not confirm an account", {
+        accountId: account.account_id,
+        cause: refreshed.failure,
+      });
+      return;
+    }
+    // Only over the token it refreshed: a sign-in meanwhile keeps the newer one it brought.
+    yield* sql`
+      UPDATE j5_identity_account
+      SET refresh_token = ${refreshed.success}, last_confirmed_at = ${yield* nowIso}
+      WHERE account_id = ${account.account_id} AND refresh_token = ${account.refresh_token}
+    `.pipe(Effect.mapError(storage("record a confirmation")));
+  });
+
+  /** Refreshes every bound account; whether J5 Connect gave any answer at all. */
+  const refreshAll = Effect.fn("j5.identity.refreshAll")(function* (connect: ConnectRow) {
+    const discovery = yield* withHttp(Oidc.discover(connect.issuer)).pipe(Effect.result);
+    if (discovery._tag === "Failure") {
+      yield* Effect.logWarning("J5 Connect could not be reached to confirm accounts", {
+        cause: discovery.failure,
+      });
+      return Oidc.answered(discovery.failure);
+    }
+    const secret = yield* clientSecret.pipe(Effect.option);
+    if (Option.isNone(secret)) return true;
     const confirming = yield* sql<{
       readonly account_id: string;
       readonly subject: string;
@@ -560,45 +669,22 @@ const make = Effect.gen(function* () {
         ON person.person_id = account.person_id AND person.removed_at IS NULL
       WHERE account.refresh_token IS NOT NULL
     `.pipe(Effect.mapError(storage("read the accounts to confirm")));
-    if (confirming.length > 0) {
-      // An outage here, or J5 Connect refusing, is not acted on: only a day without a
-      // confirmation ends a sign-in, since Dex answers both with the same error.
-      const reached = yield* withHttp(Oidc.discover(connect.issuer)).pipe(
-        Effect.flatMap((discovery) =>
-          clientSecret.pipe(Effect.map((secret) => ({ discovery, secret }))),
+    yield* Effect.forEach(
+      confirming,
+      (account) =>
+        confirmOne(connect, discovery.success, secret.value, account).pipe(
+          Effect.catchTags({
+            IdentityStorageError: (cause) =>
+              Effect.logWarning("Could not record a J5 Connect confirmation", { cause }),
+          }),
         ),
-        Effect.option,
-      );
-      if (Option.isSome(reached)) {
-        const { discovery, secret } = reached.value;
-        for (const account of confirming) {
-          const refreshed = yield* withHttp(
-            Oidc.refresh({
-              discovery,
-              clientId: connect.client_id,
-              clientSecret: secret,
-              refreshToken: account.refresh_token,
-              subject: account.subject,
-              nowMillis: yield* nowMillis,
-            }),
-          ).pipe(Effect.result);
-          if (refreshed._tag === "Failure") {
-            yield* Effect.logWarning("J5 Connect did not confirm an account", {
-              accountId: account.account_id,
-              cause: refreshed.failure,
-            });
-            continue;
-          }
-          yield* sql`
-            UPDATE j5_identity_account
-            SET refresh_token = ${refreshed.success}, last_confirmed_at = ${yield* nowIso}
-            WHERE account_id = ${account.account_id}
-          `.pipe(Effect.mapError(storage("record a confirmation")));
-        }
-      } else {
-        yield* Effect.logWarning("J5 Connect could not be reached to confirm accounts");
-      }
-    }
+      { concurrency: REFRESH_CONCURRENCY, discard: true },
+    );
+    return true;
+  });
+
+  /** Ends the sign-in of every bound account not confirmed for a day, each on its own. */
+  const sweep = Effect.fn("j5.identity.sweep")(function* () {
     const cutoff = yield* ago(CONFIRMATION_LAPSE);
     const lapsed = yield* sql<{ readonly account_id: string; readonly person_id: string }>`
       SELECT account.account_id, account.person_id FROM j5_identity_account AS account
@@ -616,7 +702,41 @@ const make = Effect.gen(function* () {
           )
         )
     `.pipe(Effect.mapError(storage("read the accounts not confirmed")));
-    for (const account of lapsed) yield* lapse(account);
+    for (const account of lapsed) {
+      const ended = yield* Effect.result(lapse(account, cutoff));
+      if (ended._tag === "Failure") {
+        yield* Effect.logWarning(
+          "Could not end a lapsed account's sign-in; trying again next pass",
+          {
+            accountId: account.account_id,
+            cause: ended.failure,
+          },
+        );
+      }
+    }
+  });
+
+  const confirmAll: Identity["Service"]["confirmAll"] = Effect.gen(function* () {
+    const now = yield* nowIso;
+    yield* committed(
+      "tidy expired sign-ins and requests",
+      Effect.gen(function* () {
+        yield* sql`DELETE FROM j5_identity_sign_in WHERE expires_at <= ${now}`;
+        // A request past its week keeps no token to carry onto a binding.
+        yield* sql`
+          UPDATE j5_identity_account SET refresh_token = NULL, last_confirmed_at = NULL
+          WHERE person_id IS NULL AND requested_at <= ${yield* ago(REQUEST_LIFETIME)}
+        `;
+      }),
+    );
+    const connect = yield* readConnect;
+    if (connect === null) return;
+    const answeredNow = yield* refreshAll(connect);
+    const since = yield* Ref.updateAndGet(unreachableSince, (current) =>
+      answeredNow ? null : (current ?? now),
+    );
+    const silentForADay = since !== null && addIso(since, CONFIRMATION_LAPSE) <= (yield* nowIso);
+    if (answeredNow || silentForADay) yield* sweep();
   }).pipe(Effect.withSpan("j5.identity.confirmAll"));
 
   return Identity.of({
@@ -699,18 +819,12 @@ const make = Effect.gen(function* () {
       const expiresAt = DateTime.formatIso(
         DateTime.add(now, { milliseconds: Duration.toMillis(SIGN_IN_LIFETIME) }),
       );
-      yield* committed(
-        "start a sign-in",
-        Effect.gen(function* () {
-          yield* sql`DELETE FROM j5_identity_sign_in WHERE expires_at <= ${DateTime.formatIso(now)}`;
-          yield* sql`
-            INSERT INTO j5_identity_sign_in (state, nonce, code_verifier, return_url, expires_at)
-            VALUES (
-              ${signIn.state}, ${signIn.nonce}, ${signIn.codeVerifier}, ${returnUrl}, ${expiresAt}
-            )
-          `;
-        }),
-      );
+      yield* sql`
+        INSERT INTO j5_identity_sign_in (state, nonce, code_verifier, return_url, expires_at)
+        VALUES (
+          ${signIn.state}, ${signIn.nonce}, ${signIn.codeVerifier}, ${returnUrl}, ${expiresAt}
+        )
+      `.pipe(Effect.mapError(storage("start a sign-in")));
       return Oidc.authorizationUrl({
         discovery,
         clientId: connect.client_id,
@@ -723,14 +837,19 @@ const make = Effect.gen(function* () {
 
     completeSignIn: Effect.fn("j5.identity.completeSignIn")(function* (input) {
       const now = yield* nowIso;
+      const arrivedAt = callbackUrl(input.origin);
+      const started = yield* sql<{ readonly return_url: string }>`
+        SELECT return_url FROM j5_identity_sign_in
+        WHERE state = ${input.state} AND expires_at > ${now}
+      `.pipe(Effect.mapError(storage("read a sign-in")));
+      if (started[0] === undefined) return yield* new SignInExpiredError({});
+      // Checked before the state is spent, so a wrong arrival leaves the sign-in to finish.
+      if (started[0].return_url !== arrivedAt) return yield* new SignInElsewhereError({});
       // Taken once: a state replayed, or one older than ten minutes, is refused.
-      const taken = yield* sql<{
-        readonly nonce: string;
-        readonly code_verifier: string;
-        readonly return_url: string;
-      }>`
-        DELETE FROM j5_identity_sign_in WHERE state = ${input.state} AND expires_at > ${now}
-        RETURNING nonce, code_verifier, return_url
+      const taken = yield* sql<{ readonly nonce: string; readonly code_verifier: string }>`
+        DELETE FROM j5_identity_sign_in
+        WHERE state = ${input.state} AND expires_at > ${now} AND return_url = ${arrivedAt}
+        RETURNING nonce, code_verifier
       `.pipe(Effect.mapError(storage("finish a sign-in")));
       const pending = taken[0];
       if (pending === undefined) return yield* new SignInExpiredError({});
@@ -743,16 +862,22 @@ const make = Effect.gen(function* () {
           clientId: connect.client_id,
           clientSecret: secret,
           code: input.code,
-          returnUrl: pending.return_url,
+          returnUrl: arrivedAt,
           codeVerifier: pending.code_verifier,
           nonce: pending.nonce,
           nowMillis: yield* nowMillis,
         }),
       );
-      const requestSince = yield* ago(REQUEST_LIFETIME);
       const outcome = yield* committed(
         "record a sign-in",
         Effect.gen(function* () {
+          // A leave, or a switch to another J5 Connect, while J5 Connect answered: this
+          // sign-in no longer counts.
+          const current = yield* readConnect;
+          if (current === null || current.issuer !== identity.issuer) {
+            return yield* new IdentityNotJoinedError({});
+          }
+          const at = yield* nowIso;
           yield* sql`
             INSERT INTO j5_identity_account (account_id, issuer, subject, email, name)
             VALUES (
@@ -767,16 +892,18 @@ const make = Effect.gen(function* () {
             WHERE account.issuer = ${identity.issuer} AND account.subject = ${identity.subject}
           `;
           if (account === undefined) return yield* Effect.die("account just written is missing");
-          if (account.person_id !== null && account.person_removed !== 1) {
+          const standing = requestStanding(account, at);
+          if (standing === "bound") {
             yield* sql`
               UPDATE j5_identity_account
-              SET refresh_token = ${refreshToken}, last_confirmed_at = ${now}
+              SET refresh_token = ${refreshToken}, last_confirmed_at = ${at},
+                sign_in_ended_at = NULL
               WHERE account_id = ${account.account_id}
             `;
             const credential = yield* mintPairingCredential({
               linkId: null,
               signInAccountId: account.account_id,
-              personId: ParticipantId.make(account.person_id),
+              personId: ParticipantId.make(account.person_id!),
               name: null,
             }).pipe(
               Effect.provideService(PersonAccess, people),
@@ -785,21 +912,21 @@ const make = Effect.gen(function* () {
             );
             return { kind: "pair" as const, credential };
           }
-          // A request already in force stands, declined or waiting; otherwise this one asks.
-          if (
-            account.person_id === null &&
-            account.requested_at !== null &&
-            account.requested_at > requestSince
-          ) {
-            return account.declined_at === null
-              ? { kind: "waiting" as const }
-              : { kind: "not-let-in" as const };
+          if (standing === "not-let-in") {
+            yield* sql`
+              UPDATE j5_identity_account SET refresh_token = NULL, last_confirmed_at = NULL
+              WHERE account_id = ${account.account_id}
+            `;
+            return { kind: "not-let-in" as const };
           }
-          // Bound to someone since removed, or a request that expired: it asks afresh.
+          // Waiting, or asking afresh: the confirmed token is kept on the request, so a binding
+          // is confirmed from the start.
           yield* sql`
             UPDATE j5_identity_account
-            SET person_id = NULL, bound_at = NULL, refresh_token = NULL, last_confirmed_at = NULL,
-              requested_at = ${now}, declined_at = NULL
+            SET person_id = NULL, bound_at = NULL, refresh_token = ${refreshToken},
+              last_confirmed_at = ${at}, sign_in_ended_at = NULL,
+              requested_at = ${standing === "waiting" ? account.requested_at : at},
+              declined_at = NULL
             WHERE account_id = ${account.account_id}
           `;
           return { kind: "waiting" as const };
@@ -815,26 +942,19 @@ const make = Effect.gen(function* () {
       const personId = yield* committed(
         "let an account in",
         Effect.gen(function* () {
-          const account = yield* readAccount(input.accountId);
-          if (account === null) {
-            return yield* new AccountNotFoundError({ accountId: input.accountId });
-          }
-          if (account.person_id !== null && account.person_removed !== 1) {
-            return yield* new AccountAlreadyBoundError({});
-          }
+          yield* waitingRequest(input.accountId);
           const person = yield* people.createPerson({ displayName: name });
           yield* access.setLevel({
             personId: person.personId,
             scope: input.scope,
             level: input.level,
           });
-          const now = yield* nowIso;
           yield* sql`
             UPDATE j5_identity_account
-            SET person_id = ${person.personId}, bound_at = ${now}, requested_at = NULL,
-              declined_at = NULL
+            SET person_id = ${person.personId}, bound_at = ${yield* nowIso}, requested_at = NULL,
+              declined_at = NULL, sign_in_ended_at = NULL
             WHERE account_id = ${input.accountId}
-          `.pipe(Effect.mapError(storage("bind an account")));
+          `;
           return person.personId;
         }),
       );
@@ -846,13 +966,7 @@ const make = Effect.gen(function* () {
       yield* committed(
         "bind an account",
         Effect.gen(function* () {
-          const account = yield* readAccount(input.accountId);
-          if (account === null) {
-            return yield* new AccountNotFoundError({ accountId: input.accountId });
-          }
-          if (account.person_id !== null && account.person_removed !== 1) {
-            return yield* new AccountAlreadyBoundError({});
-          }
+          yield* waitingRequest(input.accountId);
           const person = yield* people
             .readPerson(ParticipantId.make(input.personId))
             .pipe(Effect.mapError(storage("read a person")));
@@ -861,49 +975,48 @@ const make = Effect.gen(function* () {
           }
           const already = yield* sql`
             SELECT 1 AS found FROM j5_identity_account WHERE person_id = ${input.personId}
-          `.pipe(Effect.mapError(storage("read a person's account")));
+          `;
           if (already.length > 0) {
             return yield* new PersonAlreadyBoundError({ personName: person.displayName });
           }
-          const now = yield* nowIso;
           yield* sql`
             UPDATE j5_identity_account
-            SET person_id = ${input.personId}, bound_at = ${now}, requested_at = NULL,
-              declined_at = NULL
+            SET person_id = ${input.personId}, bound_at = ${yield* nowIso}, requested_at = NULL,
+              declined_at = NULL, sign_in_ended_at = NULL
             WHERE account_id = ${input.accountId}
-          `.pipe(Effect.mapError(storage("bind an account")));
+          `;
         }),
       );
       yield* peopleChanged;
     }),
 
     decline: Effect.fn("j5.identity.decline")(function* (accountId) {
-      const account = yield* readAccount(accountId);
-      if (account === null || account.requested_at === null) {
-        return yield* new AccountNotFoundError({ accountId });
-      }
-      if (account.person_id !== null && account.person_removed !== 1) {
-        return yield* new AccountAlreadyBoundError({});
-      }
-      yield* sql`
-        UPDATE j5_identity_account SET declined_at = ${yield* nowIso} WHERE account_id = ${accountId}
-      `.pipe(Effect.mapError(storage("decline a request")));
+      yield* committed(
+        "decline a request",
+        Effect.gen(function* () {
+          yield* waitingRequest(accountId);
+          yield* sql`
+            UPDATE j5_identity_account
+            SET declined_at = ${yield* nowIso}, refresh_token = NULL, last_confirmed_at = NULL
+            WHERE account_id = ${accountId}
+          `;
+        }),
+      );
       yield* peopleChanged;
     }),
 
     unbind: Effect.fn("j5.identity.unbind")(function* (personId) {
-      const rows = yield* sql<{ readonly account_id: string }>`
-        SELECT account_id FROM j5_identity_account WHERE person_id = ${personId}
-      `.pipe(Effect.mapError(storage("read a person's account")));
-      const account = rows[0];
-      if (account === undefined) return yield* new PersonNotBoundError({});
-      yield* endSignIn(account.account_id);
-      yield* sql`
+      // The binding goes first, so nothing from the account pairs or renews after it.
+      const unbound = yield* sql<{ readonly account_id: string }>`
         UPDATE j5_identity_account
         SET person_id = NULL, bound_at = NULL, refresh_token = NULL, last_confirmed_at = NULL,
-          requested_at = NULL, declined_at = NULL
-        WHERE account_id = ${account.account_id}
+          requested_at = NULL, declined_at = NULL, sign_in_ended_at = NULL
+        WHERE person_id = ${personId}
+        RETURNING account_id
       `.pipe(Effect.mapError(storage("unbind an account")));
+      const account = unbound[0];
+      if (account === undefined) return yield* new PersonNotBoundError({});
+      yield* endSignIn({ accountId: account.account_id });
       yield* peopleChanged;
     }),
 

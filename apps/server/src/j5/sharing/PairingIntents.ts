@@ -19,6 +19,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as SessionStore from "../../auth/SessionStore.ts";
 import { ParticipantId } from "../a2a/contracts.ts";
 import { ReadChanges, layer as readChangesLayer } from "../a2a/ReadChanges.ts";
+import { signInLive } from "../identity/signInLive.ts";
 import {
   FIRST_OWNER_SUBJECTS,
   PersonAccess,
@@ -69,6 +70,7 @@ export class PairingIntentError extends Schema.TaggedError<PairingIntentError>()
       "scopes",
       "no_person",
       "link_revoked",
+      "sign_in_ended",
       "storage",
     ]),
     cause: Schema.optional(Schema.Defect()),
@@ -86,6 +88,8 @@ export class PairingIntentError extends Schema.TaggedError<PairingIntentError>()
         return "This link was made for someone who is no longer on this server.";
       case "link_revoked":
         return "This link was revoked before the device paired.";
+      case "sign_in_ended":
+        return "This sign-in ended before the device paired. Sign in again.";
       case "storage":
         return "Could not record whose device this is.";
     }
@@ -258,11 +262,18 @@ const make: Layer.Layer<PairingIntents, never, SqlClient.SqlClient | ReadChanges
               if (!live) return yield* new PairingIntentError({ reason: "no_person" });
               return;
             }
+            // A device paired from a signed-in one is that sign-in's too, so offboarding the
+            // account reaches it (J5 Connect, Offboarding).
+            const creatorSignIn = yield* sql<{ readonly sign_in_account_id: string | null }>`
+              SELECT sign_in_account_id FROM j5_a2a_person_session
+              WHERE session_id = ${input.creator.sessionId}
+            `.pipe(Effect.mapError(storage));
             yield* record({
               pairingLinkId: input.pairingLinkId,
               credential: input.credential,
               personId: reach.person.personId,
               linkId: null,
+              signInAccountId: creatorSignIn[0]?.sign_in_account_id ?? null,
               ceiling: input.scopes,
             });
           },
@@ -342,6 +353,13 @@ const make: Layer.Layer<PairingIntents, never, SqlClient.SqlClient | ReadChanges
                   if (link[0] !== undefined && link[0].revoked_at !== null) {
                     return yield* new PairingIntentError({ reason: "link_revoked" });
                   }
+                }
+                // A sign-in's credential pairs only while its account still vouches for the person.
+                if (
+                  intent.signInAccountId !== null &&
+                  !(yield* signInLive(sql, intent.signInAccountId, intent.personId))
+                ) {
+                  return yield* new PairingIntentError({ reason: "sign_in_ended" });
                 }
                 const levels = yield* people.listLevels(intent.personId);
                 const allowed = devicePermissions(

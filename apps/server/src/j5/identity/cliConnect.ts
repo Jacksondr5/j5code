@@ -33,6 +33,7 @@ import {
   readLiveServerRuntimeState,
 } from "../../serverRuntimeState.ts";
 import { cliEnvironmentAuth } from "../sharing/AccessGate.ts";
+import { ownedHomeAuth } from "../sharing/cliPairing.ts";
 import * as Identity from "./Identity.ts";
 
 /**
@@ -165,20 +166,25 @@ const change = Effect.fn("j5.identity.cli.change")(function* <A>(input: {
         ),
       );
   }
+  // The lock first, then the database on it: upstream's own runtime layer would wait on the lock
+  // to run pending migrations, which this process already holds (`ownedHomeAuth`).
   return yield* acquireServerOwnership(config.serverRuntimeStatePath).pipe(
     Effect.provide(ProcessRunner.layer),
-    Effect.andThen(input.locally),
-    Effect.tap(() => clearPersistedServerRuntimeState(config.serverRuntimeStatePath)),
-    Effect.provide(
-      runtime(
-        Identity.layer.pipe(
-          Layer.provideMerge(cliEnvironmentAuth(EnvironmentAuth.layerRuntime)),
-          Layer.provideMerge(ServerSecretStore.layer),
-          Layer.provideMerge(FetchHttpClient.layer),
-          Layer.provideMerge(ServerConfig.layer(config)),
+    Effect.andThen(
+      input.locally.pipe(
+        Effect.provide(
+          runtime(
+            Identity.layer.pipe(
+              Layer.provideMerge(cliEnvironmentAuth(ownedHomeAuth)),
+              Layer.provideMerge(ServerSecretStore.layer),
+              Layer.provideMerge(FetchHttpClient.layer),
+              Layer.provideMerge(ServerConfig.layer(config)),
+            ),
+          ),
         ),
       ),
     ),
+    Effect.tap(() => clearPersistedServerRuntimeState(config.serverRuntimeStatePath)),
     Effect.scoped,
   );
 });

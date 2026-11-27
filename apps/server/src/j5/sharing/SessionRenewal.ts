@@ -20,6 +20,7 @@ import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
 import * as SessionStore from "../../auth/SessionStore.ts";
 import { AuthSessionRepository } from "../../persistence/AuthSessions.ts";
 import { ParticipantId } from "../a2a/contracts.ts";
+import { signInLive } from "../identity/signInLive.ts";
 import { PersonAccess } from "./PersonAccess.ts";
 
 /**
@@ -134,8 +135,12 @@ export const makeSessionRenewal = (services: {
         : Option.getOrElse(decodeCeiling(binding.ceiling_scopes), () => []);
     const levels = yield* people.listLevels(personId);
     const scopes = devicePermissions(highestLevel(levels.map((held) => held.level)), ceiling);
-    // A session from sign-in stays one, so a lapse of its account still ends it.
+    // A session from sign-in stays one, so a lapse of its account still ends it; one whose
+    // account no longer vouches for the person is not renewed.
     const signInAccountId = binding.sign_in_account_id;
+    if (signInAccountId !== null && !(yield* signInLive(sql, signInAccountId, personId))) {
+      return yield* new NotRenewableError({});
+    }
     return { old, remaining, personId, ceiling, scopes, signInAccountId };
   });
 

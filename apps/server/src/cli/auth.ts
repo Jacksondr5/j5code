@@ -394,7 +394,7 @@ const sessionCommand = Command.make("session").pipe(
 
 export const authCommand = Command.make("auth").pipe(
   Command.withDescription("Manage the local auth control plane for headless deployments."),
-  // J5: `auth connect` joins or leaves a J5 Connect (FORK.md case 70).
+  // J5: `auth connect` joins or leaves a J5 Connect (FORK.md case 79).
   Command.withSubcommands([
     pairingCommand,
     sessionCommand,

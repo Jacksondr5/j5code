@@ -2,9 +2,12 @@
 import * as NodeCrypto from "node:crypto";
 
 import * as Context from "effect/Context";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as HttpClient from "effect/http/HttpClient";
+import * as HttpClientError from "effect/http/HttpClientError";
+import type * as HttpClientRequest from "effect/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
 
 /**
@@ -31,12 +34,36 @@ interface Code {
   readonly challenge: string;
 }
 
+/** A point a request waits at: `entered` when it gets there, and it goes on once `release` is done. */
+export interface Gate {
+  readonly entered: Deferred.Deferred<void>;
+  readonly release: Deferred.Deferred<void>;
+}
+
+export const makeGate = Effect.gen(function* () {
+  return {
+    entered: yield* Deferred.make<void>(),
+    release: yield* Deferred.make<void>(),
+  } satisfies Gate;
+});
+
 export interface FakeConnectShape {
   readonly client: HttpClient.HttpClient;
   readonly returnUrls: Set<string>;
   readonly users: Map<string, User>;
+  /** While set, every request fails as if J5 Connect could not be reached at all. */
+  down: boolean;
   /** While set, every token request answers as Dex does when its identity provider is down. */
   outage: boolean;
+  /** Refreshes of these accounts never answer; `stalled` completes when one starts. */
+  readonly stall: Set<string>;
+  stalled: Deferred.Deferred<void> | null;
+  /** A refresh answers 200 with no ID token. */
+  refreshWithoutIdToken: boolean;
+  /** Discovery names its endpoints over plain HTTP. */
+  plainHttpEndpoints: boolean;
+  /** The next code exchange waits at this gate. */
+  codeGate: Gate | null;
   /** Overrides on the next ID token's claims, to make one that must not be trusted. */
   nextClaims: Record<string, unknown> | null;
   /** Signs `subject` in at an authorization URL the server made; returns the code sent back. */
@@ -71,7 +98,13 @@ const make = Effect.promise(async () => {
     client: undefined as never,
     returnUrls: new Set(),
     users: new Map(),
+    down: false,
     outage: false,
+    stall: new Set(),
+    stalled: null,
+    refreshWithoutIdToken: false,
+    plainHttpEndpoints: false,
+    codeGate: null,
     nextClaims: null,
     signIn: (authorizationUrl, subject) => {
       const url = new URL(authorizationUrl);
@@ -112,18 +145,22 @@ const make = Effect.promise(async () => {
     return `${signed}.${Buffer.from(signature).toString("base64url")}`;
   };
 
-  const tokens = async (subject: string, nonce: string | undefined) => {
+  const tokens = async (subject: string, nonce: string | undefined, withIdToken = true) => {
     const refreshToken = random();
     refreshTokens.set(refreshToken, subject);
     return json({
       access_token: random(),
       token_type: "bearer",
-      id_token: await idToken(subject, nonce),
+      ...(withIdToken ? { id_token: await idToken(subject, nonce) } : {}),
       refresh_token: refreshToken,
     });
   };
 
-  const token = async (headers: Record<string, string>, body: URLSearchParams) => {
+  /** What the token endpoint answers; `"stall"` for a refresh that never answers. */
+  const token = async (
+    headers: Record<string, string>,
+    body: URLSearchParams,
+  ): Promise<Response | "stall"> => {
     const basic = Buffer.from((headers.authorization ?? "").replace(/^Basic /, ""), "base64")
       .toString("utf8")
       .split(":")
@@ -146,23 +183,30 @@ const make = Effect.promise(async () => {
     if (body.get("grant_type") === "refresh_token") {
       const presented = body.get("refresh_token") ?? "";
       const subject = refreshTokens.get(presented);
+      if (subject !== undefined && fake.stall.has(subject)) return "stall";
       refreshTokens.delete(presented);
       // Dex refuses a disabled account's refresh with the same answer as an outage.
       if (subject === undefined || fake.users.get(subject)?.active !== true) {
         return json({ error: "invalid_request" }, 500);
       }
-      return tokens(subject, undefined);
+      return tokens(subject, undefined, !fake.refreshWithoutIdToken);
     }
     return json({ error: "unsupported_grant_type" }, 400);
   };
 
-  const route = async (method: string, url: URL, headers: Record<string, string>, body: string) => {
+  const route = async (
+    method: string,
+    url: URL,
+    headers: Record<string, string>,
+    body: string,
+  ): Promise<Response | "stall"> => {
     if (url.origin !== ISSUER) return new Response("not found", { status: 404 });
     if (method === "GET" && url.pathname === "/.well-known/openid-configuration") {
+      const base = fake.plainHttpEndpoints ? ISSUER.replace("https:", "http:") : ISSUER;
       return json({
         issuer: ISSUER,
         authorization_endpoint: `${ISSUER}/auth`,
-        token_endpoint: `${ISSUER}/token`,
+        token_endpoint: `${base}/token`,
         jwks_uri: `${ISSUER}/keys`,
       });
     }
@@ -190,16 +234,34 @@ const make = Effect.promise(async () => {
     return new Response("not found", { status: 404 });
   };
 
-  return Object.assign(fake, {
-    client: HttpClient.make((request) =>
-      Effect.promise(async () => {
-        const body =
-          request.body._tag === "Uint8Array" ? new TextDecoder().decode(request.body.body) : "";
-        const response = await route(request.method, new URL(request.url), request.headers, body);
-        return HttpClientResponse.fromWeb(request, response);
-      }),
-    ),
+  const respond = Effect.fn("test.fakeConnect.respond")(function* (
+    request: HttpClientRequest.HttpClientRequest,
+  ) {
+    if (fake.down) {
+      return yield* new HttpClientError.HttpClientError({
+        reason: new HttpClientError.TransportError({ request, description: "connect refused" }),
+      });
+    }
+    const body =
+      request.body._tag === "Uint8Array" ? new TextDecoder().decode(request.body.body) : "";
+    const params = new URLSearchParams(body);
+    const gate = fake.codeGate;
+    if (gate !== null && params.get("grant_type") === "authorization_code") {
+      fake.codeGate = null;
+      yield* Deferred.succeed(gate.entered, undefined);
+      yield* Deferred.await(gate.release);
+    }
+    const response = yield* Effect.promise(() =>
+      route(request.method, new URL(request.url), request.headers, body),
+    );
+    if (response === "stall") {
+      if (fake.stalled !== null) yield* Deferred.succeed(fake.stalled, undefined);
+      return yield* Effect.never;
+    }
+    return HttpClientResponse.fromWeb(request, response);
   });
+
+  return Object.assign(fake, { client: HttpClient.make((request) => respond(request)) });
 });
 
 /** The fake J5 Connect, and the `HttpClient` that reaches it. */

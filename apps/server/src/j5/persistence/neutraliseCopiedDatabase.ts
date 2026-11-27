@@ -139,6 +139,7 @@ export const neutraliseJ5State = Effect.fn("j5.neutraliseJ5State")(function* () 
       );
 
       yield* count("j5_identity_connect", sql`DELETE FROM j5_identity_connect RETURNING issuer`);
+      yield* count("j5_identity_sign_in", sql`DELETE FROM j5_identity_sign_in RETURNING state`);
       const signInAccounts = yield* count(
         "j5_identity_account",
         sql`DELETE FROM j5_identity_account RETURNING account_id`,

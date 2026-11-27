@@ -97,11 +97,11 @@ export const identityHttpRouteLayer = Layer.unwrap(
         const url = requestUrl(request);
         const state = Option.isSome(url) ? url.value.searchParams.get("state") : null;
         const code = Option.isSome(url) ? url.value.searchParams.get("code") : null;
-        if (state === null || code === null) {
+        if (Option.isNone(url) || state === null || code === null) {
           // J5 Connect sends `error` back when the person cancelled or was refused there.
           return toPairing("failed");
         }
-        return yield* identity.completeSignIn({ state, code }).pipe(
+        return yield* identity.completeSignIn({ state, code, origin: url.value.origin }).pipe(
           Effect.map((outcome) => toPairing(outcome.kind === "pair" ? outcome : outcome.kind)),
           Effect.catch((cause) =>
             Effect.logWarning("J5 sign-in could not finish", { cause }).pipe(

@@ -526,8 +526,9 @@ export const pairingLinkFromCli = Effect.fn("j5.sharing.cliPairing.pairingLinkFr
 /**
  * Upstream's `EnvironmentAuth.layerRuntime` on `layerConfig`: this CLI already holds the home's
  * lock, which `layerCliConfig` would wait on to migrate, as upstream's `project` command does.
+ * `j5 auth connect` builds on it too (`identity/cliConnect.ts`).
  */
-const ownedHomeAuth = EnvironmentAuth.layer.pipe(
+export const ownedHomeAuth = EnvironmentAuth.layer.pipe(
   Layer.provideMerge(ManagedPolicy.layer),
   Layer.provideMerge(Layer.mergeAll(ServerSecretStore.layer, SqlitePersistence.layerConfig)),
   Layer.provideMerge(ServerEnvironment.layerIdentity),

@@ -35,7 +35,6 @@ const refused = failAsJ5ActionError({
     "ClientSecretRefusedError",
     "ReturnUrlsNotRegisteredError",
     "AccountNotFoundError",
-    "AccountAlreadyBoundError",
     "PersonAlreadyBoundError",
     "PersonNotBoundError",
     "IdentityPersonNotFoundError",

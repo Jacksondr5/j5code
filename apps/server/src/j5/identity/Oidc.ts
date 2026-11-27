@@ -7,7 +7,6 @@ import * as Schema from "effect/Schema";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
-import type * as HttpClientResponse from "effect/http/HttpClientResponse";
 
 /**
  * The small OIDC client a J5 server is of its J5 Connect: the code flow with PKCE, state and
@@ -18,7 +17,10 @@ import type * as HttpClientResponse from "effect/http/HttpClientResponse";
 
 export class OidcError extends Schema.TaggedError<OidcError>()("OidcError", {
   stage: Schema.Literals(["discovery", "token", "refresh", "id_token", "probe"]),
-  /** The OAuth error code or HTTP status the J5 Connect answered with, when it gave one. */
+  /**
+   * The OAuth error code or HTTP status the J5 Connect answered with. Absent when it gave no
+   * answer at all: unreachable, or too slow.
+   */
   status: Schema.optional(Schema.String),
   cause: Schema.optional(Schema.Defect()),
 }) {
@@ -39,8 +41,14 @@ export class OidcError extends Schema.TaggedError<OidcError>()("OidcError", {
   }
 }
 
+/** Whether the J5 Connect gave any answer, as opposed to none: unreachable or too slow. */
+export const answered = (error: OidcError) => error.status !== undefined;
+
+/** Each request, its body included, ends by this, so a stalled J5 Connect holds nothing up. */
 const REQUEST_TIMEOUT = "15 seconds";
 const SCOPES = "openid email profile offline_access";
+/** How far apart this server's clock and J5 Connect's may be. */
+const CLOCK_SKEW_SECONDS = 120;
 
 const Discovery = Schema.Struct({
   issuer: Schema.String,
@@ -77,6 +85,8 @@ const IdTokenClaims = Schema.Struct({
   sub: Schema.String,
   aud: Schema.Union([Schema.String, Schema.Array(Schema.String)]),
   exp: Schema.Number,
+  iat: Schema.optional(Schema.Number),
+  nbf: Schema.optional(Schema.Number),
   azp: Schema.optional(Schema.String),
   nonce: Schema.optional(Schema.String),
   email: Schema.optional(Schema.String),
@@ -111,37 +121,76 @@ export const newSignIn = () => {
   };
 };
 
-const fail = (stage: OidcError["stage"], status?: string) => (cause: unknown) =>
-  new OidcError({ stage, ...(status === undefined ? {} : { status }), cause });
+const LOOPBACK_HOSTS = new Set(["localhost", "[::1]"]);
 
-/** The JSON a J5 Connect answered, read without trusting it to be JSON. */
-const jsonOf = (response: HttpClientResponse.HttpClientResponse) =>
-  response.text.pipe(
-    Effect.map((text) => {
-      try {
-        return JSON.parse(text) as unknown;
-      } catch {
-        return null;
-      }
-    }),
+/** HTTPS, or plain HTTP to this machine only: tokens and codes travel on these addresses. */
+const isSafeOidcUrl = (value: string) => {
+  try {
+    const url = new URL(value);
+    if (url.protocol === "https:") return true;
+    return (
+      url.protocol === "http:" &&
+      (LOOPBACK_HOSTS.has(url.hostname) || /^127(\.\d{1,3}){3}$/.test(url.hostname))
+    );
+  } catch {
+    return false;
+  }
+};
+
+const parseJson = (text: string): unknown => {
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * One request to the J5 Connect and its whole body, bounded together. Redirects are not followed:
+ * an OIDC endpoint that redirects answers with its redirect, which nothing here accepts.
+ */
+const exchange = Effect.fn("j5.identity.oidc.exchange")(function* (
+  stage: OidcError["stage"],
+  request: HttpClientRequest.HttpClientRequest,
+) {
+  const client = yield* HttpClient.HttpClient;
+  return yield* client.execute(request).pipe(
+    Effect.flatMap((response) =>
+      response.text.pipe(
+        Effect.map((text) => ({ status: response.status, body: parseJson(text), response })),
+      ),
+    ),
+    Effect.timeout(REQUEST_TIMEOUT),
+    Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
+    Effect.mapError((cause) => new OidcError({ stage, cause })),
   );
+});
 
 /** The discovery document at the issuer, refused unless it names exactly that issuer. */
 export const discover = Effect.fn("j5.identity.oidc.discover")(function* (issuer: string) {
-  const client = yield* HttpClient.HttpClient;
-  const url = `${issuer.replace(/\/$/, "")}/.well-known/openid-configuration`;
-  const response = yield* client
-    .get(url, { acceptJson: true })
-    .pipe(Effect.timeout(REQUEST_TIMEOUT), Effect.mapError(fail("discovery")));
-  if (response.status !== 200) {
-    return yield* new OidcError({ stage: "discovery", status: String(response.status) });
+  if (!isSafeOidcUrl(issuer)) {
+    return yield* new OidcError({ stage: "discovery", status: "issuer is not https" });
   }
-  const document = yield* jsonOf(response).pipe(
-    Effect.flatMap(decodeDiscovery),
-    Effect.mapError(fail("discovery")),
+  const url = `${issuer.replace(/\/$/, "")}/.well-known/openid-configuration`;
+  const { status, body } = yield* exchange(
+    "discovery",
+    HttpClientRequest.get(url).pipe(HttpClientRequest.acceptJson),
+  );
+  if (status !== 200) return yield* new OidcError({ stage: "discovery", status: String(status) });
+  const document = yield* decodeDiscovery(body).pipe(
+    Effect.mapError((cause) => new OidcError({ stage: "discovery", status: "unreadable", cause })),
   );
   if (document.issuer !== issuer) {
     return yield* new OidcError({ stage: "discovery", status: "issuer mismatch" });
+  }
+  for (const endpoint of [
+    document.authorization_endpoint,
+    document.token_endpoint,
+    document.jwks_uri,
+  ]) {
+    if (!isSafeOidcUrl(endpoint)) {
+      return yield* new OidcError({ stage: "discovery", status: "endpoint is not https" });
+    }
   }
   return document;
 });
@@ -177,27 +226,27 @@ const postToken = Effect.fn("j5.identity.oidc.postToken")(function* (
     readonly params: Record<string, string>;
   },
 ) {
-  const client = yield* HttpClient.HttpClient;
-  const response = yield* HttpClientRequest.post(input.discovery.token_endpoint).pipe(
-    HttpClientRequest.basicAuth(
-      encodeURIComponent(input.clientId),
-      encodeURIComponent(input.clientSecret),
+  const { status, body } = yield* exchange(
+    stage,
+    HttpClientRequest.post(input.discovery.token_endpoint).pipe(
+      HttpClientRequest.basicAuth(
+        encodeURIComponent(input.clientId),
+        encodeURIComponent(input.clientSecret),
+      ),
+      HttpClientRequest.acceptJson,
+      HttpClientRequest.bodyUrlParams(input.params),
     ),
-    HttpClientRequest.acceptJson,
-    HttpClientRequest.bodyUrlParams(input.params),
-    client.execute,
-    Effect.timeout(REQUEST_TIMEOUT),
-    Effect.mapError(fail(stage)),
   );
-  const body = yield* jsonOf(response).pipe(Effect.mapError(fail(stage)));
-  if (response.status !== 200) {
+  if (status !== 200) {
     const said = Option.match(decodeOAuthError(body), {
-      onNone: () => String(response.status),
-      onSome: (error) => `${String(response.status)} ${error.error}`,
+      onNone: () => String(status),
+      onSome: (error) => `${String(status)} ${error.error}`,
     });
     return yield* new OidcError({ stage, status: said });
   }
-  return yield* decodeToken(body).pipe(Effect.mapError(fail(stage)));
+  return yield* decodeToken(body).pipe(
+    Effect.mapError((cause) => new OidcError({ stage, status: "unreadable", cause })),
+  );
 });
 
 const base64UrlBytes = (value: string) => new Uint8Array(Buffer.from(value, "base64url"));
@@ -217,7 +266,7 @@ const ALGORITHMS: Record<
 
 /**
  * Verifies an ID token's signature against the J5 Connect's keys, then its issuer, audience,
- * expiry and, at sign-in, nonce. Anything that does not check out is refused alike.
+ * times and, at sign-in, nonce. Anything that does not check out is refused alike.
  */
 const verifyIdToken = Effect.fn("j5.identity.oidc.verifyIdToken")(function* (input: {
   readonly discovery: Discovery;
@@ -233,18 +282,15 @@ const verifyIdToken = Effect.fn("j5.identity.oidc.verifyIdToken")(function* (inp
   const header = yield* decodeHeader(Buffer.from(headerPart, "base64url").toString("utf8")).pipe(
     Effect.mapError(() => refused("header")),
   );
-  const algorithm = ALGORITHMS[header.alg];
-  if (algorithm === undefined) return yield* refused("algorithm");
+  if (!Object.hasOwn(ALGORITHMS, header.alg)) return yield* refused("algorithm");
+  const algorithm = ALGORITHMS[header.alg]!;
 
-  const client = yield* HttpClient.HttpClient;
-  const keys = yield* client
-    .get(input.discovery.jwks_uri, { acceptJson: true })
-    .pipe(
-      Effect.timeout(REQUEST_TIMEOUT),
-      Effect.flatMap(jsonOf),
-      Effect.flatMap(decodeJwks),
-      Effect.mapError(fail("id_token", "keys")),
-    );
+  const fetched = yield* exchange(
+    "id_token",
+    HttpClientRequest.get(input.discovery.jwks_uri).pipe(HttpClientRequest.acceptJson),
+  );
+  if (fetched.status !== 200) return yield* refused(`keys ${String(fetched.status)}`);
+  const keys = yield* decodeJwks(fetched.body).pipe(Effect.mapError(() => refused("keys")));
   const key = keys.keys.find(
     (candidate) =>
       candidate.kty === algorithm.kty &&
@@ -270,18 +316,26 @@ const verifyIdToken = Effect.fn("j5.identity.oidc.verifyIdToken")(function* (inp
         new TextEncoder().encode(`${headerPart}.${payloadPart}`),
       );
     },
-    catch: fail("id_token", "signature"),
+    catch: (cause) => new OidcError({ stage: "id_token", status: "signature", cause }),
   });
   if (!verified) return yield* refused("signature");
 
   const claims = yield* decodeClaims(Buffer.from(payloadPart, "base64url").toString("utf8")).pipe(
     Effect.mapError(() => refused("claims")),
   );
+  const nowSeconds = input.nowMillis / 1000;
   if (claims.iss !== input.discovery.issuer) return yield* refused("issuer");
   const audiences = typeof claims.aud === "string" ? [claims.aud] : claims.aud;
   if (!audiences.includes(input.clientId)) return yield* refused("audience");
-  if (audiences.length > 1 && claims.azp !== input.clientId) return yield* refused("audience");
-  if (claims.exp * 1000 <= input.nowMillis) return yield* refused("expired");
+  if (claims.azp !== undefined && claims.azp !== input.clientId) return yield* refused("azp");
+  if (audiences.length > 1 && claims.azp === undefined) return yield* refused("azp");
+  if (claims.exp + CLOCK_SKEW_SECONDS <= nowSeconds) return yield* refused("expired");
+  if (claims.nbf !== undefined && claims.nbf - CLOCK_SKEW_SECONDS > nowSeconds) {
+    return yield* refused("not yet valid");
+  }
+  if (claims.iat !== undefined && claims.iat - CLOCK_SKEW_SECONDS > nowSeconds) {
+    return yield* refused("issued in the future");
+  }
   if (input.nonce !== null && claims.nonce !== input.nonce) return yield* refused("nonce");
   return {
     issuer: claims.iss,
@@ -327,8 +381,9 @@ export const exchangeCode = Effect.fn("j5.identity.oidc.exchangeCode")(function*
 });
 
 /**
- * Refreshes an account's sign-in, which only succeeds while its upstream account is active. A new
- * ID token, when one comes back, must name the same account. Returns the refresh token to keep.
+ * Refreshes an account's sign-in, which only succeeds while its upstream account is active. The
+ * answer must carry an ID token for the same account, as Dex's does for an `openid` client; one
+ * without confirms nothing. Returns the refresh token to keep.
  */
 export const refresh = Effect.fn("j5.identity.oidc.refresh")(function* (input: {
   readonly discovery: Discovery;
@@ -344,17 +399,18 @@ export const refresh = Effect.fn("j5.identity.oidc.refresh")(function* (input: {
     clientSecret: input.clientSecret,
     params: { grant_type: "refresh_token", refresh_token: input.refreshToken },
   });
-  if (tokens.id_token !== undefined) {
-    const identity = yield* verifyIdToken({
-      discovery: input.discovery,
-      clientId: input.clientId,
-      idToken: tokens.id_token,
-      nonce: null,
-      nowMillis: input.nowMillis,
-    });
-    if (identity.subject !== input.subject) {
-      return yield* new OidcError({ stage: "id_token", status: "subject" });
-    }
+  if (tokens.id_token === undefined) {
+    return yield* new OidcError({ stage: "refresh", status: "no id_token" });
+  }
+  const identity = yield* verifyIdToken({
+    discovery: input.discovery,
+    clientId: input.clientId,
+    idToken: tokens.id_token,
+    nonce: null,
+    nowMillis: input.nowMillis,
+  });
+  if (identity.subject !== input.subject) {
+    return yield* new OidcError({ stage: "id_token", status: "subject" });
   }
   return tokens.refresh_token ?? input.refreshToken;
 });
@@ -405,20 +461,12 @@ export const returnUrlRegistered = Effect.fn("j5.identity.oidc.returnUrlRegister
     readonly clientId: string;
     readonly returnUrl: string;
   }) {
-    const client = yield* HttpClient.HttpClient;
     const probe = newSignIn();
     const issuerOrigin = new URL(input.discovery.authorization_endpoint).origin;
     let url = authorizationUrl({ ...input, ...probe });
     for (let hop = 0; hop < MAX_PROBE_HOPS; hop += 1) {
-      const response = yield* client
-        .get(url)
-        .pipe(
-          Effect.timeout(REQUEST_TIMEOUT),
-          Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
-          Effect.mapError(fail("probe")),
-        );
-      yield* Effect.ignore(response.text);
-      if (response.status >= 300 && response.status < 400) {
+      const { status, response } = yield* exchange("probe", HttpClientRequest.get(url));
+      if (status >= 300 && status < 400) {
         const location = response.headers.location;
         if (location === undefined) return false;
         const next = new URL(location, url);
@@ -426,7 +474,7 @@ export const returnUrlRegistered = Effect.fn("j5.identity.oidc.returnUrlRegister
         url = next.toString();
         continue;
       }
-      return response.status >= 200 && response.status < 300;
+      return status >= 200 && status < 300;
     }
     return false;
   },

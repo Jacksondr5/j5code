@@ -1,12 +1,16 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
-import type { AuthSessionId } from "@t3tools/contracts";
+import { AuthAccessWriteScope, type AuthSessionId } from "@t3tools/contracts";
+import { LEVEL_PERMISSIONS } from "@t3tools/contracts/j5";
+import * as Context from "effect/Context";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Queue from "effect/Queue";
+import * as Ref from "effect/Ref";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as TestClock from "effect/testing/TestClock";
 
@@ -16,17 +20,50 @@ import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
 import * as SessionStore from "../../auth/SessionStore.ts";
 import * as ServerConfig from "../../config.ts";
 import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
+import { AuthSessionRepository } from "../../persistence/AuthSessions.ts";
 import * as ManagedPolicy from "../../policy/ManagedPolicy.ts";
+import { Access } from "../sharing/Access.ts";
 import * as AccessGate from "../sharing/AccessGate.ts";
+import { Links } from "../sharing/Links.ts";
+import { PairingIntents } from "../sharing/PairingIntents.ts";
 import * as PersonAccess from "../sharing/PersonAccess.ts";
+import { makeSessionRenewal } from "../sharing/SessionRenewal.ts";
 import { peopleLayer, person } from "../sharing/test-support/accessHarness.ts";
 import * as Identity from "./Identity.ts";
 import * as FakeConnect from "./test-support/fakeConnect.ts";
+
+/** Holds the gate's one-session revoke at a gate, for the interleaving tests. */
+class RevokeGate extends Context.Service<RevokeGate, Ref.Ref<FakeConnect.Gate | null>>()(
+  "t3/j5/identity/Identity.test/RevokeGate",
+) {}
+
+const gatedRevokes = Layer.effect(
+  EnvironmentAuth.EnvironmentAuth,
+  Effect.gen(function* () {
+    const inner = yield* EnvironmentAuth.EnvironmentAuth;
+    const gate = yield* RevokeGate;
+    return EnvironmentAuth.EnvironmentAuth.of({
+      ...inner,
+      revokeSession: (sessionId) =>
+        Ref.getAndSet(gate, null).pipe(
+          Effect.flatMap((held) =>
+            held === null
+              ? Effect.void
+              : Deferred.succeed(held.entered, undefined).pipe(
+                  Effect.andThen(Deferred.await(held.release)),
+                ),
+          ),
+          Effect.andThen(inner.revokeSession(sessionId)),
+        ),
+    });
+  }),
+);
 
 // Sign-in as the server composes it, over upstream's real auth and a J5 Connect in-process. The
 // hourly loop is left out, so each test runs `confirmAll` itself at the hour it means.
 const makeLayer = () =>
   Identity.layer.pipe(
+    Layer.provideMerge(gatedRevokes),
     Layer.provideMerge(AccessGate.layerGatedEnvironmentAuth),
     Layer.provideMerge(
       EnvironmentAuth.layer.pipe(
@@ -37,13 +74,16 @@ const makeLayer = () =>
         Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-identity-" })),
       ),
     ),
+    Layer.provideMerge(Layer.effect(RevokeGate, Ref.make<FakeConnect.Gate | null>(null))),
     Layer.provideMerge(FakeConnect.layer),
     Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
   );
 
 const requestMetadata = { deviceType: "desktop" as const, os: "Linux", browser: "Firefox" };
+const phoneMetadata = { deviceType: "mobile" as const, os: "iOS", browser: "Safari" };
+const SECOND_ADDRESS = "https://j5.example.test";
 
-/** Joins the fake J5 Connect, registering whatever return addresses the first try asks for. */
+/** Joins the fake J5 Connect at two addresses, registering what the first try asks for. */
 const joined = Effect.gen(function* () {
   const identity = yield* Identity.Identity;
   const connect = yield* FakeConnect.FakeConnect;
@@ -51,7 +91,7 @@ const joined = Effect.gen(function* () {
     issuer: FakeConnect.ISSUER,
     clientId: FakeConnect.CLIENT_ID,
     clientSecret: FakeConnect.CLIENT_SECRET,
-    addresses: [],
+    addresses: [SECOND_ADDRESS],
   });
   const first = yield* Effect.flip(join);
   if (first._tag !== "ReturnUrlsNotRegisteredError") return yield* Effect.die(first);
@@ -59,18 +99,28 @@ const joined = Effect.gen(function* () {
   return yield* join;
 });
 
+const firstOrigin = Effect.gen(function* () {
+  const identity = yield* Identity.Identity;
+  return new URL((yield* identity.state).connect!.returnUrls[0]!).origin;
+});
+
+/** Starts a sign-in at `origin` and has J5 Connect sign `subject` in; returns its state and code. */
+const startedAs = Effect.fn("test.startedAs")(function* (subject: string, origin?: string) {
+  const identity = yield* Identity.Identity;
+  const connect = yield* FakeConnect.FakeConnect;
+  const at = origin ?? (yield* firstOrigin);
+  const url = yield* identity.startSignIn(at);
+  return {
+    origin: at,
+    state: new URL(url).searchParams.get("state")!,
+    code: connect.signIn(url, subject),
+  };
+});
+
 /** One full sign-in by `subject` at the server's first address, as a browser would. */
 const signIn = Effect.fn("test.signIn")(function* (subject: string) {
   const identity = yield* Identity.Identity;
-  const connect = yield* FakeConnect.FakeConnect;
-  const state = yield* identity.state;
-  const origin = new URL(state.connect!.returnUrls[0]!).origin;
-  const authorizationUrl = yield* identity.startSignIn(origin);
-  const code = connect.signIn(authorizationUrl, subject);
-  return yield* identity.completeSignIn({
-    state: new URL(authorizationUrl).searchParams.get("state")!,
-    code,
-  });
+  return yield* identity.completeSignIn(yield* startedAs(subject));
 });
 
 const addUser = Effect.fn("test.addUser")(function* (subject: string, name: string) {
@@ -78,14 +128,21 @@ const addUser = Effect.fn("test.addUser")(function* (subject: string, name: stri
   connect.users.set(subject, { email: `${subject}@example.test`, name, active: true });
 });
 
-/** A bound account's browser, signed in and paired from the credential its sign-in gave. */
+const credentialFor = Effect.fn("test.credentialFor")(function* (subject: string) {
+  const outcome = yield* signIn(subject);
+  if (outcome.kind !== "pair") return yield* Effect.die(outcome.kind);
+  return outcome.credential;
+});
+
+/** A bound account's browser, paired from the credential its sign-in gave. */
 const pairedBrowser = Effect.fn("test.pairedBrowser")(function* (subject: string) {
   const auth = yield* EnvironmentAuth.EnvironmentAuth;
   const sessions = yield* SessionStore.SessionStore;
-  const outcome = yield* signIn(subject);
-  if (outcome.kind !== "pair") return yield* Effect.die(outcome.kind);
-  const paired = yield* auth.createBrowserSession(outcome.credential, requestMetadata);
-  return (yield* sessions.verify(paired.sessionToken)).sessionId;
+  const paired = yield* auth.createBrowserSession(yield* credentialFor(subject), requestMetadata);
+  return {
+    sessionId: (yield* sessions.verify(paired.sessionToken)).sessionId,
+    token: paired.sessionToken,
+  };
 });
 
 const isLive = Effect.fn("test.isLive")(function* (sessionId: AuthSessionId) {
@@ -101,65 +158,79 @@ const countPeople = Effect.gen(function* () {
   return rows[0]!.n;
 });
 
-const grantAda = Effect.gen(function* () {
+const grantAs = Effect.fn("test.grantAs")(function* (
+  subject: string,
+  name: string,
+  level: "viewer" | "collaborator" | "owner" = "collaborator",
+) {
   const identity = yield* Identity.Identity;
-  yield* addUser("ada", "Ada");
-  assert.deepStrictEqual(yield* signIn("ada"), { kind: "waiting" });
-  const [request] = (yield* identity.state).requests;
+  yield* addUser(subject, name);
+  assert.deepStrictEqual(yield* signIn(subject), { kind: "waiting" });
+  const request = (yield* identity.state).requests.find(
+    (entry) => entry.email === `${subject}@example.test`,
+  )!;
   return yield* identity.grant({
-    accountId: request!.accountId,
-    name: "Ada",
+    accountId: request.accountId,
+    name,
     scope: { kind: "server" },
-    level: "collaborator",
+    level,
   });
+});
+
+const grantAda = grantAs("ada", "Ada");
+
+/** Runs the hourly pass `hours` times, an hour apart. */
+const passes = Effect.fn("test.passes")(function* (hours: number) {
+  const identity = yield* Identity.Identity;
+  for (let hour = 0; hour < hours; hour += 1) {
+    yield* TestClock.adjust("1 hour");
+    yield* identity.confirmAll;
+  }
+});
+
+const disable = Effect.fn("test.disable")(function* (subject: string) {
+  const connect = yield* FakeConnect.FakeConnect;
+  connect.users.get(subject)!.active = false;
 });
 
 it.effect("joining checks the client's secret and every return address before it trusts", () =>
   Effect.gen(function* () {
     const identity = yield* Identity.Identity;
     const connect = yield* FakeConnect.FakeConnect;
-    const wrongSecret = yield* Effect.flip(
+    const join = (clientSecret: string, issuer = FakeConnect.ISSUER) =>
       identity.join({
-        issuer: FakeConnect.ISSUER,
+        issuer,
         clientId: FakeConnect.CLIENT_ID,
-        clientSecret: "not-the-secret",
-        addresses: [],
-      }),
+        clientSecret,
+        addresses: [SECOND_ADDRESS],
+      });
+    assert.strictEqual(
+      (yield* Effect.flip(join("not-the-secret")))._tag,
+      "ClientSecretRefusedError",
     );
-    assert.strictEqual(wrongSecret._tag, "ClientSecretRefusedError");
 
-    const missing = yield* Effect.flip(
-      identity.join({
-        issuer: FakeConnect.ISSUER,
-        clientId: FakeConnect.CLIENT_ID,
-        clientSecret: FakeConnect.CLIENT_SECRET,
-        addresses: ["https://j5.example.test"],
-      }),
-    );
+    const missing = yield* Effect.flip(join(FakeConnect.CLIENT_SECRET));
     if (missing._tag !== "ReturnUrlsNotRegisteredError") return assert.fail(missing._tag);
-    assert.include(missing.toRegister, "https://j5.example.test/api/j5/identity/callback");
+    assert.include(missing.toRegister, `${SECOND_ADDRESS}/api/j5/identity/callback`);
     assert.isTrue(missing.toRegister.every((url) => url.endsWith("/api/j5/identity/callback")));
     assert.isNull((yield* identity.describe).signIn);
 
     for (const url of missing.toRegister.slice(1)) connect.returnUrls.add(url);
-    const stillMissing = yield* Effect.flip(
-      identity.join({
-        issuer: FakeConnect.ISSUER,
-        clientId: FakeConnect.CLIENT_ID,
-        clientSecret: FakeConnect.CLIENT_SECRET,
-        addresses: ["https://j5.example.test"],
-      }),
-    );
+    const stillMissing = yield* Effect.flip(join(FakeConnect.CLIENT_SECRET));
     if (stillMissing._tag !== "ReturnUrlsNotRegisteredError") return assert.fail(stillMissing._tag);
     assert.deepStrictEqual(stillMissing.missing, missing.toRegister.slice(0, 1));
 
+    // Tokens and codes travel only over HTTPS, or to this machine.
+    const plain = yield* Effect.flip(
+      join(FakeConnect.CLIENT_SECRET, "http://connect.example.test"),
+    );
+    assert.strictEqual(plain._tag, "OidcError");
+    connect.plainHttpEndpoints = true;
     connect.returnUrls.add(missing.toRegister[0]!);
-    const done = yield* identity.join({
-      issuer: FakeConnect.ISSUER,
-      clientId: FakeConnect.CLIENT_ID,
-      clientSecret: FakeConnect.CLIENT_SECRET,
-      addresses: ["https://j5.example.test"],
-    });
+    assert.strictEqual((yield* Effect.flip(join(FakeConnect.CLIENT_SECRET)))._tag, "OidcError");
+    connect.plainHttpEndpoints = false;
+
+    const done = yield* join(FakeConnect.CLIENT_SECRET);
     assert.deepStrictEqual(done.returnUrls, missing.toRegister);
     assert.deepStrictEqual(yield* identity.describe, {
       signIn: { host: "connect.example.test" },
@@ -172,6 +243,7 @@ it.effect("an account that is no one yet waits for an Owner, and sign-in makes n
     const identity = yield* Identity.Identity;
     yield* joined;
     yield* addUser("grace", "Grace");
+    yield* addUser("hopper", "Hopper");
     const before = yield* countPeople;
 
     assert.deepStrictEqual(yield* signIn("grace"), { kind: "waiting" });
@@ -181,14 +253,26 @@ it.effect("an account that is no one yet waits for an Owner, and sign-in makes n
     assert.strictEqual(state.requests[0]!.email, "grace@example.test");
     assert.strictEqual(yield* countPeople, before);
 
-    yield* identity.decline(state.requests[0]!.accountId);
+    // Declined: "not let in" for a week, and no decision on it is taken twice.
+    const graceRequest = state.requests[0]!.accountId;
+    yield* identity.decline(graceRequest);
     assert.deepStrictEqual(yield* signIn("grace"), { kind: "not-let-in" });
     assert.strictEqual((yield* identity.state).requests.length, 0);
+    const owner = yield* person("Someone", [{ scope: { kind: "server" }, level: "viewer" }]);
+    assert.strictEqual(
+      (yield* Effect.flip(identity.bind({ accountId: graceRequest, personId: owner.personId })))
+        ._tag,
+      "AccountNotFoundError",
+    );
 
-    // Declined or expired is said alike; once the request is past its week, one sign-in asks again.
+    // Expired undecided says the same, from when it expired.
+    assert.deepStrictEqual(yield* signIn("hopper"), { kind: "waiting" });
     yield* TestClock.adjust("8 days");
+    assert.deepStrictEqual(yield* signIn("hopper"), { kind: "not-let-in" });
     assert.deepStrictEqual(yield* signIn("grace"), { kind: "waiting" });
-    assert.strictEqual(yield* countPeople, before);
+    yield* TestClock.adjust("7 days");
+    assert.deepStrictEqual(yield* signIn("hopper"), { kind: "waiting" });
+    assert.strictEqual(yield* countPeople, before + 1);
   }).pipe(Effect.provide(makeLayer())),
 );
 
@@ -202,8 +286,7 @@ it.effect("a granted account pairs its browser as its new person, as a link woul
       (yield* people.listLevels(adaId)).map((held) => held.level),
       ["collaborator"],
     );
-
-    const sessionId = yield* pairedBrowser("ada");
+    const { sessionId } = yield* pairedBrowser("ada");
     const reach = yield* people.sessionReach({ sessionId, subject: "j5:link" });
     assert.strictEqual(reach.kind === "person" ? reach.person.personId : null, adaId);
     const bound = yield* sql<{ readonly sign_in_account_id: string | null }>`
@@ -213,7 +296,7 @@ it.effect("a granted account pairs its browser as its new person, as a link woul
   }).pipe(Effect.provide(makeLayer())),
 );
 
-it.effect("an Owner binds an existing person, once each way, and unbinding ends sign-in", () =>
+it.effect("an Owner binds a waiting account to someone here, once each way", () =>
   Effect.gen(function* () {
     const identity = yield* Identity.Identity;
     yield* joined;
@@ -238,51 +321,48 @@ it.effect("an Owner binds an existing person, once each way, and unbinding ends 
     const accountTaken = yield* Effect.flip(
       identity.bind({ accountId: first.accountId, personId: other.personId }),
     );
-    assert.strictEqual(accountTaken._tag, "AccountAlreadyBoundError");
+    assert.strictEqual(accountTaken._tag, "AccountNotFoundError");
 
-    const sessionId = yield* pairedBrowser("lin");
-    assert.isTrue(yield* isLive(sessionId));
+    const { sessionId } = yield* pairedBrowser("lin");
     yield* identity.unbind(lin.personId);
     assert.isFalse(yield* isLive(sessionId));
     assert.strictEqual(
       (yield* Effect.flip(identity.unbind(lin.personId)))._tag,
       "PersonNotBoundError",
     );
-    // The account is no one's again, and asks afresh.
     assert.deepStrictEqual(yield* signIn("lin"), { kind: "waiting" });
   }).pipe(Effect.provide(makeLayer())),
 );
 
-it.effect("a sign-in's state is used once, and a token that does not check out is refused", () =>
+it.effect("a sign-in's state is used once, at its own address, and a bad token is refused", () =>
   Effect.gen(function* () {
     const identity = yield* Identity.Identity;
     const connect = yield* FakeConnect.FakeConnect;
     yield* joined;
     yield* grantAda;
-    const origin = new URL((yield* identity.state).connect!.returnUrls[0]!).origin;
 
-    const url = yield* identity.startSignIn(origin);
-    const state = new URL(url).searchParams.get("state")!;
-    yield* identity.completeSignIn({ state, code: connect.signIn(url, "ada") });
-    const replay = yield* Effect.flip(
-      identity.completeSignIn({ state, code: connect.signIn(url, "ada") }),
+    const started = yield* startedAs("ada");
+    // Back at another registered address: refused, and the sign-in is still there to finish.
+    const elsewhere = yield* Effect.flip(
+      identity.completeSignIn({ ...started, origin: SECOND_ADDRESS }),
     );
+    assert.strictEqual(elsewhere._tag, "SignInElsewhereError");
+    assert.strictEqual((yield* identity.completeSignIn(started)).kind, "pair");
+    const replay = yield* Effect.flip(identity.completeSignIn(started));
     assert.strictEqual(replay._tag, "SignInExpiredError");
 
     for (const claims of [
       { iss: "https://elsewhere.example.test" },
       { aud: "another-client" },
+      { azp: "another-client" },
       { nonce: "not-the-nonce" },
+      { exp: -1000 },
+      { nbf: 9_999_999_999 },
     ]) {
-      const next = yield* identity.startSignIn(origin);
+      const next = yield* startedAs("ada");
       connect.nextClaims = claims;
-      const refused = yield* Effect.flip(
-        identity.completeSignIn({
-          state: new URL(next).searchParams.get("state")!,
-          code: connect.signIn(next, "ada"),
-        }),
-      );
-      assert.strictEqual(refused._tag, "OidcError");
+      const refused = yield* Effect.flip(identity.completeSignIn(next));
+      assert.strictEqual(refused._tag, "OidcError", JSON.stringify(claims));
     }
 
     const unregistered = yield* Effect.flip(identity.startSignIn("http://198.51.100.7:3773"));
@@ -290,85 +370,198 @@ it.effect("a sign-in's state is used once, and a token that does not check out i
   }).pipe(Effect.provide(makeLayer())),
 );
 
-it.effect("an account J5 Connect keeps confirming keeps its sign-in past a day", () =>
+it.effect("a sign-in J5 Connect answered after a leave records nothing", () =>
   Effect.gen(function* () {
     const identity = yield* Identity.Identity;
+    const connect = yield* FakeConnect.FakeConnect;
+    const sql = yield* SqlClient.SqlClient;
+    yield* joined;
+    yield* addUser("grace", "Grace");
+    const started = yield* startedAs("grace");
+    const gate = yield* FakeConnect.makeGate;
+    connect.codeGate = gate;
+    const finishing = yield* Effect.forkChild(identity.completeSignIn(started));
+    yield* Deferred.await(gate.entered);
+    yield* identity.leave;
+    yield* Deferred.succeed(gate.release, undefined);
+    const exit = yield* Fiber.await(finishing);
+    assert.isTrue(Exit.isFailure(exit));
+    const accounts = yield* sql`SELECT account_id FROM j5_identity_account`;
+    assert.strictEqual(accounts.length, 0);
+  }).pipe(Effect.provide(makeLayer())),
+);
+
+it.effect("nothing from an account pairs or renews once its unbind has begun", () =>
+  Effect.gen(function* () {
+    const identity = yield* Identity.Identity;
+    const access = yield* Access;
+    const auth = yield* EnvironmentAuth.EnvironmentAuth;
+    const revokeGate = yield* RevokeGate;
+    const renewal = makeSessionRenewal({
+      sessions: yield* SessionStore.SessionStore,
+      repository: yield* AuthSessionRepository,
+      people: yield* PersonAccess.PersonAccess,
+      sql: yield* SqlClient.SqlClient,
+    });
+    yield* joined;
+    const adaId = yield* grantAda;
+    const browser = yield* pairedBrowser("ada");
+    const waiting = yield* credentialFor("ada");
+    // A change of level ends the browser's session for renewal.
+    yield* access.setLevel({ personId: adaId, scope: { kind: "server" }, level: "viewer" });
+
+    const gate = yield* FakeConnect.makeGate;
+    yield* Ref.set(revokeGate, gate);
+    const unbinding = yield* Effect.forkChild(identity.unbind(adaId));
+    yield* Deferred.await(gate.entered);
+    // Mid-cleanup: the waiting credential and the renewal are both refused.
+    const paired = yield* Effect.exit(auth.createBrowserSession(waiting, requestMetadata));
+    assert.isTrue(Exit.isFailure(paired));
+    const renewed = yield* Effect.exit(renewal.renewToken(browser.token));
+    assert.isTrue(Exit.isFailure(renewed));
+    yield* Deferred.succeed(gate.release, undefined);
+    yield* Fiber.join(unbinding);
+    assert.isFalse(yield* isLive(browser.sessionId));
+  }).pipe(Effect.provide(makeLayer())),
+);
+
+it.effect("an account J5 Connect keeps confirming keeps its sign-in past a day", () =>
+  Effect.gen(function* () {
     yield* joined;
     yield* grantAda;
-    const sessionId = yield* pairedBrowser("ada");
-    for (let hour = 0; hour < 30; hour += 1) {
-      yield* TestClock.adjust("1 hour");
-      yield* identity.confirmAll;
-    }
+    const { sessionId } = yield* pairedBrowser("ada");
+    yield* passes(30);
     assert.isTrue(yield* isLive(sessionId));
   }).pipe(Effect.provide(makeLayer())),
 );
 
 it.effect("an outage shorter than a day changes nothing", () =>
   Effect.gen(function* () {
-    const identity = yield* Identity.Identity;
     const connect = yield* FakeConnect.FakeConnect;
     yield* joined;
     yield* grantAda;
-    const sessionId = yield* pairedBrowser("ada");
+    const { sessionId } = yield* pairedBrowser("ada");
     connect.outage = true;
-    for (let hour = 0; hour < 23; hour += 1) {
-      yield* TestClock.adjust("1 hour");
-      yield* identity.confirmAll;
-    }
+    yield* passes(23);
     assert.isTrue(yield* isLive(sessionId));
     connect.outage = false;
-    yield* TestClock.adjust("1 hour");
-    yield* identity.confirmAll;
-    yield* TestClock.adjust("23 hours");
-    yield* identity.confirmAll;
+    yield* passes(24);
     assert.isTrue(yield* isLive(sessionId));
   }).pipe(Effect.provide(makeLayer())),
 );
 
 it.effect("a disabled account's sign-in lapses after a day, closing its open socket", () =>
   Effect.gen(function* () {
-    const identity = yield* Identity.Identity;
-    const connect = yield* FakeConnect.FakeConnect;
     const sessions = yield* SessionStore.SessionStore;
     const auth = yield* EnvironmentAuth.EnvironmentAuth;
     yield* joined;
     yield* grantAda;
     const browser = yield* pairedBrowser("ada");
-    // A phone too, whose session is bound to a key it holds.
-    const outcome = yield* signIn("ada");
-    if (outcome.kind !== "pair") return assert.fail(outcome.kind);
     const key = makeDpopKey();
     const phone = yield* auth.exchangeBootstrapCredentialForAccessToken(
-      outcome.credential,
+      yield* credentialFor("ada"),
       undefined,
-      { deviceType: "mobile", os: "iOS", browser: "Safari" },
+      phoneMetadata,
       { proofKeyThumbprint: key.thumbprint },
     );
     const phoneSession = (yield* sessions.verify(phone.access_token)).sessionId;
-    const socket = yield* Effect.forkChild(sessions.awaitInvalidation(browser));
+    const socket = yield* Effect.forkChild(sessions.awaitInvalidation(browser.sessionId));
 
-    connect.users.get("ada")!.active = false;
-    yield* TestClock.adjust("23 hours");
-    yield* identity.confirmAll;
-    assert.isTrue(yield* isLive(browser));
-
-    yield* TestClock.adjust("1 hour");
-    yield* identity.confirmAll;
-    assert.isFalse(yield* isLive(browser));
+    yield* disable("ada");
+    yield* passes(23);
+    assert.isTrue(yield* isLive(browser.sessionId));
+    yield* passes(1);
+    assert.isFalse(yield* isLive(browser.sessionId));
     assert.isFalse(yield* isLive(phoneSession));
     assert.isTrue(Exit.isSuccess(yield* Fiber.await(socket)));
 
     // Signing in again works only once the company account is active again.
-    connect.users.get("ada")!.active = true;
+    (yield* FakeConnect.FakeConnect).users.get("ada")!.active = true;
     assert.strictEqual((yield* signIn("ada")).kind, "pair");
   }).pipe(Effect.provide(makeLayer())),
 );
 
-it.effect("a lapsed Owner's MCP clients end as a removed Owner's do", () =>
+it.effect("a refresh that carries no ID token confirms nothing", () =>
+  Effect.gen(function* () {
+    const connect = yield* FakeConnect.FakeConnect;
+    yield* joined;
+    yield* grantAda;
+    const { sessionId } = yield* pairedBrowser("ada");
+    connect.refreshWithoutIdToken = true;
+    yield* passes(24);
+    assert.isFalse(yield* isLive(sessionId));
+  }).pipe(Effect.provide(makeLayer())),
+);
+
+it.effect("a phone paired from a signed-in browser is that sign-in's; a link's device is not", () =>
+  Effect.gen(function* () {
+    const auth = yield* EnvironmentAuth.EnvironmentAuth;
+    const sessions = yield* SessionStore.SessionStore;
+    const intents = yield* PairingIntents;
+    const links = yield* Links;
+    const identity = yield* Identity.Identity;
+    yield* joined;
+    const adaId = yield* grantAs("ada", "Ada", "owner");
+    const browser = yield* pairedBrowser("ada");
+    // An Owner's Connections link, made from the signed-in browser, for a phone.
+    const link = yield* auth.createPairingLink({
+      scopes: [...LEVEL_PERMISSIONS.owner],
+      subject: "one-time-token",
+    });
+    yield* intents.recordForCreator({
+      creator: { sessionId: browser.sessionId, subject: "j5:link" },
+      pairingLinkId: link.id,
+      credential: link.credential,
+      scopes: [...LEVEL_PERMISSIONS.owner],
+      creatorLive: Effect.succeed(true),
+    });
+    const key = makeDpopKey();
+    const phone = yield* auth.exchangeBootstrapCredentialForAccessToken(
+      link.credential,
+      undefined,
+      phoneMetadata,
+      { proofKeyThumbprint: key.thumbprint },
+    );
+    const phoneSession = (yield* sessions.verify(phone.access_token)).sessionId;
+    // A J5 link for Ada's tablet, on the same device key as a signed-in session there.
+    const tabletKey = makeDpopKey();
+    const deviceLink = yield* links.create(
+      { sessionId: browser.sessionId, subject: "j5:link" },
+      { kind: "device", personId: adaId },
+    );
+    const joinedLink = yield* links.join({
+      token: deviceLink.token,
+      name: undefined,
+      session: null,
+    });
+    if (joinedLink.kind !== "pair") return assert.fail(joinedLink.kind);
+    const tablet = yield* auth.exchangeBootstrapCredentialForAccessToken(
+      joinedLink.credential,
+      undefined,
+      phoneMetadata,
+      { proofKeyThumbprint: tabletKey.thumbprint },
+    );
+    const tabletLinked = (yield* sessions.verify(tablet.access_token)).sessionId;
+    const tabletSigned = yield* auth.exchangeBootstrapCredentialForAccessToken(
+      yield* credentialFor("ada"),
+      undefined,
+      phoneMetadata,
+      { proofKeyThumbprint: tabletKey.thumbprint },
+    );
+    const tabletSignedIn = (yield* sessions.verify(tabletSigned.access_token)).sessionId;
+
+    yield* identity.unbind(adaId);
+    assert.isFalse(yield* isLive(browser.sessionId));
+    assert.isFalse(yield* isLive(phoneSession));
+    assert.isFalse(yield* isLive(tabletSignedIn));
+    // Only the identity's own sessions end: the link's, on the same key, stays.
+    assert.isTrue(yield* isLive(tabletLinked));
+  }).pipe(Effect.provide(makeLayer())),
+);
+
+it.effect("a bound Owner who never signs in again is confirmed, and lapses when disabled", () =>
   Effect.gen(function* () {
     const identity = yield* Identity.Identity;
-    const connect = yield* FakeConnect.FakeConnect;
     const sessions = yield* SessionStore.SessionStore;
     const sql = yield* SqlClient.SqlClient;
     yield* joined;
@@ -377,23 +570,72 @@ it.effect("a lapsed Owner's MCP clients end as a removed Owner's do", () =>
     yield* signIn("bea");
     const [request] = (yield* identity.state).requests;
     yield* identity.bind({ accountId: request!.accountId, personId: owner.personId });
-    yield* pairedBrowser("bea");
     const mcp = yield* sessions.issue({
       method: "bearer-access-token",
       subject: "mcp-client",
-      scopes: [],
+      scopes: [AuthAccessWriteScope],
     });
     yield* sql`
       INSERT INTO j5_a2a_mcp_client_approver (session_id, person_id, expires_at)
       VALUES (${mcp.sessionId}, ${owner.personId}, '2999-01-01T00:00:00.000Z')
     `;
+    // Confirmed from the binding on, though Bea never signs in again.
+    yield* passes(30);
+    assert.isTrue(yield* isLive(mcp.sessionId));
+    assert.isNotNull((yield* identity.state).accounts[0]!.lastConfirmedAt);
 
-    connect.users.get("bea")!.active = false;
-    yield* TestClock.adjust("25 hours");
-    yield* identity.confirmAll;
+    yield* disable("bea");
+    yield* passes(24);
     assert.isFalse(yield* isLive(mcp.sessionId));
     // Still on the server: an Owner removing them is a separate decision.
     assert.isNotNull(yield* (yield* PersonAccess.PersonAccess).readPerson(owner.personId));
+  }).pipe(Effect.provide(makeLayer())),
+);
+
+it.effect("one stalled refresh does not keep another account's sign-in alive", () =>
+  Effect.gen(function* () {
+    const identity = yield* Identity.Identity;
+    const connect = yield* FakeConnect.FakeConnect;
+    yield* joined;
+    yield* grantAda;
+    yield* grantAs("bob", "Bob");
+    yield* pairedBrowser("ada");
+    const bob = yield* pairedBrowser("bob");
+    yield* disable("bob");
+    connect.stall.add("ada");
+    connect.stalled = yield* Deferred.make<void>();
+    yield* TestClock.adjust("25 hours");
+    const pass = yield* Effect.forkChild(identity.confirmAll);
+    yield* Deferred.await(connect.stalled);
+    yield* TestClock.adjust("16 seconds");
+    yield* Fiber.join(pass);
+    assert.isFalse(yield* isLive(bob.sessionId));
+  }).pipe(Effect.provide(makeLayer())),
+);
+
+it.effect("waking with no network lapses no one; a day of passes with no answer does", () =>
+  Effect.gen(function* () {
+    const identity = yield* Identity.Identity;
+    const connect = yield* FakeConnect.FakeConnect;
+    yield* joined;
+    yield* grantAda;
+    const { sessionId } = yield* pairedBrowser("ada");
+
+    // Asleep for 30 hours, then a pass before the network is up, then one after.
+    yield* TestClock.adjust("30 hours");
+    connect.down = true;
+    yield* identity.confirmAll;
+    assert.isTrue(yield* isLive(sessionId));
+    connect.down = false;
+    yield* passes(1);
+    assert.isTrue(yield* isLive(sessionId));
+
+    // Unreachable for a day of hourly passes: it fails closed.
+    connect.down = true;
+    yield* passes(24);
+    assert.isTrue(yield* isLive(sessionId));
+    yield* passes(1);
+    assert.isFalse(yield* isLive(sessionId));
   }).pipe(Effect.provide(makeLayer())),
 );
 
@@ -403,7 +645,7 @@ it.effect("leaving clears bindings and requests and ends every sign-in session",
     const people = yield* PersonAccess.PersonAccess;
     yield* joined;
     const adaId = yield* grantAda;
-    const sessionId = yield* pairedBrowser("ada");
+    const { sessionId } = yield* pairedBrowser("ada");
     yield* addUser("grace", "Grace");
     yield* signIn("grace");
 
