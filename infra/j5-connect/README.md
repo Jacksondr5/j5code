@@ -1,2 +1,2 @@
 This directory contains the J5 Connect container image, Compose stack, and local test profile.
-The operator guide will land at `docs/j5/user/j5-connect.md` in a follow-up PR.
+The operator guide is the [J5 Connect runbook](../../docs/j5/runbooks/j5-connect.md).

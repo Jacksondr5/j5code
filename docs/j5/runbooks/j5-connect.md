@@ -1,10 +1,17 @@
+---
+title: "J5 Connect — running one and joining J5 servers to it"
+kind: runbook
+---
+
 # J5 Connect
 
 J5 Connect signs people in to your J5 servers through an identity provider you choose: your
 company's (Entra ID, Okta or another OIDC provider), GitHub, or Google. It's one container,
 running Dex and Caddy, plus Postgres for Dex's state. The J5 servers run separately, and each one
-trusts the J5 Connect it joins. [People and sharing](people-and-sharing.md#signing-in-through-j5-connect)
-says what signing in does on a server.
+trusts the J5 Connect it joins. The behavior is defined in
+[People and access](../product/features/people-and-access.md) (Sign-in and offboarding), and
+[People and sharing](../user/people-and-sharing.md#signing-in-through-j5-connect) says what signing
+in does for the people on a server. This page tells an operator what to run.
 
 ## Run your own J5 Connect
 
@@ -42,8 +49,13 @@ Then fill in these values:
 Keep the two named volumes across upgrades. Back up Postgres, which holds the signing keys and
 everyone's sign-in state, and keep your `.env` and Caddy's data where you can recover them.
 
-J5 Connect is configured so that a disabled account stops being confirmed. Keep its Dex settings as
-the image sets them.
+J5 Connect only starts with the Dex settings that let J5 servers notice a disabled account, so
+keep them as the image sets them:
+
+- Dex's own sessions are off.
+- Only the authorization-code and refresh-token grants are allowed.
+- Refresh tokens rotate on every use, with a reuse interval of zero.
+- With `oidc`, the scopes must include `offline_access`, so the provider issues refresh tokens.
 
 ### Choose an identity provider
 
@@ -55,24 +67,41 @@ the image sets them.
   application's audience to your organization.
 - **GitHub:** choose `github`, and register a GitHub OAuth app.
 
-J5 servers know each account by the provider's issuer and the person's id there, never by email.
-Changing the upstream issuer gives everyone a new account, which an Owner binds again.
+J5 servers know each account by J5 Connect's issuer and the id J5 Connect gives the person, never
+by email. J5 Connect makes that id from the provider and the person's id there, so changing the
+upstream OIDC issuer, or the provider, gives everyone a new id: each person signs in as a new
+account, and an Owner binds it to them again.
 
 GitHub and Google accounts outlive a job, and they can't tell J5 that someone left. With those,
 an Owner removes the person on each server.
 
 ### An internal deployment
 
-On a host the internet can't reach, give Caddy your own certificate. Write a Caddyfile that serves
-`{$J5_CONNECT_HOST}` with `tls /certs/cert.pem /certs/key.pem`, or with `tls internal` for Caddy's
-own authority. It can use only `{$J5_CONNECT_HOST}` and its own certificate paths; Caddy is given
-no other settings. Mount it over `/opt/j5-connect/Caddyfile` with a read-only volume in your
-Compose file, and mount your certificate files the same way.
+On a host the internet can't reach, give Caddy your own certificate. Copy the bundled
+`infra/j5-connect/Caddyfile` and add a `tls` line inside its site block, keeping its
+`reverse_proxy` line, which is what sends sign-ins on to Dex:
+
+```caddyfile
+{
+	admin off
+	skip_install_trust
+}
+
+{$J5_CONNECT_HOST} {
+	tls /certs/cert.pem /certs/key.pem
+	reverse_proxy 127.0.0.1:5556
+}
+```
+
+Use `tls internal` instead for Caddy's own authority. The file can use only `{$J5_CONNECT_HOST}`
+and its own certificate paths; Caddy is given no other settings. Mount it over
+`/opt/j5-connect/Caddyfile` with a read-only volume in your Compose file, and mount your
+certificate files the same way.
 
 Every J5 server that joins must trust that authority: start the server with `NODE_EXTRA_CA_CERTS`
 set to its certificate. So must every browser and phone people sign in from.
 
-## Join from a J5 server
+## Join a J5 server
 
 A J5 server trusts one J5 Connect, and you register each server with it by hand. For a first
 install:
@@ -92,26 +121,32 @@ install:
 3. On J5 Connect, add the server to `J5_CONNECT_CLIENTS` with that id, secret and redirect URIs,
    and start it with `docker compose up -d --build`. After a later change to the clients, run
    `docker compose up -d connect`.
-4. On the J5 server, join:
+4. On the J5 server, join, repeating every `--address` you gave in step 1:
 
    ```bash
    j5 auth connect join https://connect.example.com \
-     --client-id j5-server --client-secret-file ./connect-client-secret
+     --client-id j5-server --client-secret-file ./connect-client-secret \
+     --address https://j5.example.com
    ```
 
-   Pass `-` as the file to read the secret from stdin. Joining checks the secret and every
-   redirect URI first. If one is missing, it prints the full list and changes nothing.
+   Joining works out the redirect URIs again from those addresses and saves them, so an address
+   left off here is one people can't sign in at. Pass `-` as the file to read the secret from
+   stdin. Joining checks the secret and every redirect URI first. If one is missing, it prints the
+   full list and changes nothing.
 
-An Owner can also join from **Settings → People → Sign-in**, with the same three values; it lists
-the redirect URIs to register, including the address you opened J5 Code at when that server serves
-the page. When a server gains an address,
-add its redirect URI and join again. To stop trusting a J5 Connect, run `j5 auth connect leave`, or
-choose **Leave** under **Sign-in**.
+When a server gains an address, run `redirect-uris` with it, register the new URI, and join again
+with every `--address`, old and new. An Owner can also join from **Settings → People → Sign-in**
+([People and sharing](../user/people-and-sharing.md#signing-in-through-j5-connect)). To stop
+trusting a J5 Connect, run `j5 auth connect leave`, or choose **Leave** under **Sign-in**.
 
 ## How long access lasts
 
-Each J5 server checks every signed-in account with J5 Connect every hour. Someone whose account
-is disabled at your identity provider loses access within a day while J5 Connect is reachable, and
-within 48 hours at worst. An outage doesn't sign anyone out until it has lasted a day; after
-that, people sign in again once J5 Connect is back. Removing someone from a server cuts them off
-at once.
+Each J5 server checks every signed-in account with J5 Connect every hour, and once when it
+starts. It signs out an account J5 Connect hasn't confirmed for a day, in a check J5 Connect
+answered, or after 24 checks in a row with no answer. A restart counts as a check; time the server
+spends asleep or stopped doesn't.
+
+So someone whose account is disabled at your identity provider loses access within a day while
+J5 Connect is reachable, and within 48 hours at worst while the J5 server is running. An outage
+signs no one out until it has lasted 24 checks; after that, people sign in again once J5 Connect
+is back. Removing someone from a server cuts them off at once.

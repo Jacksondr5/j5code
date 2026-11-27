@@ -74,9 +74,13 @@ or through GitHub or Google. People then sign in instead of being sent a link. L
 for people outside your company and for anyone who can't sign in.
 
 Whoever runs that J5 Connect can sign in as anyone on your server, so trust only one you or your
-company runs. To join one, an Owner opens **Settings → People → Sign-in**, or runs
-`j5 auth connect join` on the server's machine. [J5 Connect](j5-connect.md) says how to run one and
-join it.
+company runs. To join one, an Owner opens **Settings → People → Sign-in**. It lists the redirect
+URIs to give whoever runs J5 Connect, including the address you opened J5 Code at when that server
+serves the page. Once they've registered the server, enter the J5 Connect's address and the client
+id and secret they give you, and choose **Join**. Joining checks the secret and every redirect URI
+first, and changes nothing if one is missing. When the server gains an address, join again. The
+[J5 Connect runbook](../runbooks/j5-connect.md) says how to run one, and how to join from the
+server's machine with `j5 auth connect join`.
 
 To sign in:
 
@@ -99,7 +103,7 @@ Check with the person before you let them in.
 
 The server checks each signed-in account with J5 Connect every hour. Someone whose company account
 is disabled loses access within a day while J5 Connect is reachable, and within 48 hours at
-worst. That includes a phone or browser they paired from a device they signed in on.
+worst while the server is running. That includes a phone or browser they paired from a device they signed in on.
 
 Removing someone under **Settings → People** cuts them off at once. GitHub and Google accounts
 outlive a job, so with those, remove the person when they leave.
