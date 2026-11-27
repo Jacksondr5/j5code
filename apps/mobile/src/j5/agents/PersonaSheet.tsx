@@ -4,12 +4,12 @@ import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime"
 import type { AgentPersonaCatalogRow } from "@t3tools/client-runtime/j5/agent-personas";
 import type { AgentPersonaModelEntry, EnvironmentId } from "@t3tools/contracts";
 import { useEffect, useState } from "react";
-import { Modal, Platform, Pressable, ScrollView, View } from "react-native";
+import { Modal, Platform, ScrollView, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { AppText as Text } from "../../components/ui/AppText";
 import { ListActionRow } from "../../components/ui/ListActionRow";
 import { ListRowLayout } from "../../components/ui/ListRowLayout";
+import { SheetHeader } from "../../components/ui/SheetHeader";
 import { SettingsSection } from "../../features/settings/components/SettingsSection";
 import { cn } from "../../lib/cn";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -98,14 +98,11 @@ export function PersonaSheet(props: {
       {/* SafeAreaView takes no className, so the theme surface and flex go on a View. */}
       <View className="flex-1 bg-sheet">
         <SafeAreaView style={{ flex: 1 }}>
-          <View className="flex-row items-center justify-between gap-3 px-5 py-3">
-            <Text className="min-w-0 shrink text-xl font-t3-semibold" numberOfLines={1}>
-              {props.persona.displayName}
-            </Text>
-            <Pressable accessibilityRole="button" onPress={props.onClose} className="px-3 py-2">
-              <Text>Done</Text>
-            </Pressable>
-          </View>
+          <SheetHeader
+            presentation="inline"
+            title={props.persona.displayName}
+            onClose={props.onClose}
+          />
           <ScrollView contentContainerClassName="gap-5 px-5 pb-6">
             <SettingsSection>
               {rows.map((row, index) => (

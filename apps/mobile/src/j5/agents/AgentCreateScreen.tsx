@@ -8,14 +8,16 @@ import {
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import type { AgentPersonaAccess, AgentPersonaModelEntry } from "@t3tools/contracts";
 import { useState } from "react";
-import { Pressable, View } from "react-native";
 
-import { AppText as Text, AppTextInput as TextInput } from "../../components/ui/AppText";
+import { AppText as Text } from "../../components/ui/AppText";
+import { Button } from "../../components/ui/Button";
+import { SettingsSection } from "../../features/settings/components/SettingsSection";
 import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { AgentRoutePolicyFields } from "./AgentDefinitionFields";
 import { agentPersonaEnvironment } from "./agentPersonaAtoms";
+import { FormTextRow } from "./PersonaFormRows";
 import {
   SettingsFormScreen,
   useSettingsFormExit,
@@ -45,6 +47,7 @@ export function AgentCreateScreen() {
     providers ?? [],
     agentPersonaPolicyDrivers(catalog.data, "read-only"),
   );
+  const modelsLoading = providers == null || (catalog.data === null && catalog.isPending);
   const [startingDraft] = useState<PersonaDraft>(
     props.initial
       ? { ...props.initial, idEdited: true }
@@ -103,23 +106,32 @@ export function AgentCreateScreen() {
     if (result._tag === "Failure") {
       const cause = squashAtomCommandFailure(result);
       setError(cause instanceof Error ? cause.message : String(cause));
+      exit.saveFailed();
       return;
     }
     catalog.refresh();
     exit.leaveAfterSave();
   }
   return (
-    <SettingsFormScreen title={props.initial ? "Duplicate persona" : "Create persona"}>
-      <Text className="text-sm text-foreground-muted">
+    <SettingsFormScreen
+      title={props.initial ? "Duplicate persona" : "Create persona"}
+      guardBack={exit.guardBack}
+    >
+      <Text className="px-2 text-sm text-foreground-muted">
         A personal persona for this environment. It joins the library like an import, so you can
         edit, switch off, or remove it later.
       </Text>
-      <View className="gap-2">
-        <Text>Name</Text>
-        <TextInput
-          accessibilityLabel="Name"
+      <SettingsSection
+        footer={
+          draft.id !== "" && idError !== null
+            ? idError
+            : "Stable identifier used in @persona: mentions. Lowercase letters, digits, hyphens."
+        }
+      >
+        <FormTextRow
+          label="Name"
           value={draft.displayName}
-          editable={!saving}
+          disabled={saving}
           onChangeText={(displayName) =>
             setDraft({
               ...draft,
@@ -128,54 +140,43 @@ export function AgentCreateScreen() {
             })
           }
         />
-      </View>
-      <View className="gap-2">
-        <Text>ID</Text>
-        <TextInput
-          accessibilityLabel="ID"
+        <FormTextRow
+          label="ID"
+          borderTop
           autoCapitalize="none"
           autoCorrect={false}
           value={draft.id}
-          editable={!saving}
+          disabled={saving}
           onChangeText={(id) => setDraft({ ...draft, id: id.trim(), idEdited: true })}
         />
-        <Text className="text-xs text-foreground-muted">
-          {draft.id !== "" && idError !== null
-            ? idError
-            : "Stable identifier used in @persona: mentions. Lowercase letters, digits, hyphens."}
-        </Text>
-      </View>
-      <View className="gap-2">
-        <Text>Description</Text>
-        <TextInput
-          accessibilityLabel="Description"
+      </SettingsSection>
+      <SettingsSection footer="Markdown. Instructions describe behavior; the access level below is what is enforced.">
+        <FormTextRow
+          label="Description"
           multiline
           placeholder="One sentence on what this persona is for."
           value={draft.description}
-          editable={!saving}
+          disabled={saving}
           onChangeText={(description) => setDraft({ ...draft, description })}
         />
-      </View>
-      <View className="gap-2">
-        <Text>Instructions</Text>
-        <TextInput
-          accessibilityLabel="Instructions"
+        <FormTextRow
+          label="Instructions"
+          borderTop
           multiline
+          tall
           autoCapitalize="sentences"
           autoCorrect={false}
-          style={{ minHeight: 160 }}
           placeholder="# Who this persona is"
           value={draft.instructions}
-          editable={!saving}
+          disabled={saving}
           onChangeText={(instructions) => setDraft({ ...draft, instructions })}
         />
-        <Text className="text-xs text-foreground-muted">
-          Markdown. Instructions describe behavior; the access level below is what is enforced.
-        </Text>
-      </View>
+      </SettingsSection>
       {modelRoute === null ? (
-        <Text className="text-sm text-foreground-muted">
-          Sign in to Codex or Claude on this environment to choose the persona's models.
+        <Text className="px-2 text-sm text-foreground-muted">
+          {modelsLoading
+            ? "Loading models…"
+            : "Sign in to Codex or Claude on this environment to choose the persona's models."}
         </Text>
       ) : (
         <AgentRoutePolicyFields
@@ -192,21 +193,18 @@ export function AgentCreateScreen() {
         />
       )}
       {error ? (
-        <Text accessibilityRole="alert" className="text-sm text-danger-foreground">
+        <Text accessibilityRole="alert" className="px-2 text-sm text-danger-foreground">
           {error}
         </Text>
       ) : null}
-      <Pressable
-        accessibilityRole="button"
-        accessibilityState={{ disabled: !ready }}
+      <Button
+        label="Create persona"
+        tone="primary"
+        fullWidth
+        loading={saving}
         disabled={!ready}
-        className="items-center rounded-xl bg-primary px-4 py-3 disabled:opacity-40"
         onPress={() => void submit()}
-      >
-        <Text className="font-t3-semibold text-primary-foreground">
-          {saving ? "Creating…" : "Create persona"}
-        </Text>
-      </Pressable>
+      />
     </SettingsFormScreen>
   );
 }

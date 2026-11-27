@@ -13,7 +13,7 @@ import { environmentProjects } from "../../state/projects";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useRemoteConnectionStatus } from "../../state/use-remote-environment-registry";
-import { AgentFolderPickerModal } from "../agents/AgentFolderPickerModal";
+import { useSettingsFormNavigation } from "../agents/SettingsFormScreen";
 import { useOwnedEnvironmentIds } from "../sharing/guestAccess";
 import { j5Environment } from "../state";
 import { useStartPlaybookConversation } from "./startPlaybookConversation";
@@ -70,7 +70,7 @@ function PlaybookLibrary({
   const exportDefinition = useAtomCommand(j5Environment.exportPlaybook, { reportFailure: false });
   const remove = useAtomCommand(j5Environment.deletePlaybook, { reportFailure: false });
   const rename = useAtomCommand(j5Environment.renamePlaybook, { reportFailure: false });
-  const [picking, setPicking] = useState(false);
+  const navigation = useSettingsFormNavigation();
   const [importing, setImporting] = useState(false);
   const [name, setName] = useState("");
   const [yaml, setYaml] = useState("");
@@ -180,7 +180,11 @@ function PlaybookLibrary({
             else if (action === "import") {
               setError(null);
               setImporting(true);
-            } else if (action === "folder") setPicking(true);
+            } else if (action === "folder")
+              navigation.navigate("SettingsPlaybookFolder", {
+                environmentId,
+                environmentLabel: label,
+              });
             else {
               query.refresh();
               sources.refresh();
@@ -379,17 +383,6 @@ function PlaybookLibrary({
             ) : null}
           </View>
         ))}
-      {picking ? (
-        <AgentFolderPickerModal
-          environmentId={environmentId}
-          environmentLabel={label}
-          onClose={() => setPicking(false)}
-          onSelect={(path) => {
-            setPicking(false);
-            void act(() => changeFolders([...folderPaths, path]));
-          }}
-        />
-      ) : null}
       {detail ? (
         <Modal
           visible

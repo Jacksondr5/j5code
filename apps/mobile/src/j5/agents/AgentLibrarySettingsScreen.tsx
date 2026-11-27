@@ -2,10 +2,13 @@ import { serverEnvironment } from "../../state/server";
 import { LIBRARY_FOR_OWNERS } from "@t3tools/client-runtime/j5/sharing";
 import { useOwnedEnvironmentIds, useOwnerSomewhere } from "../sharing/guestAccess";
 import { AgentLibraryToast, type AgentLibraryNotification } from "./AgentLibraryToast";
-import { AgentImportConflictModal } from "./AgentImportConflictModal";
-import { agentPersonaDuplicateDraft } from "@t3tools/client-runtime/j5/agent-personas";
+import { AgentImportConflictSheet } from "./AgentImportConflictSheet";
+import {
+  agentPersonaDuplicateDraft,
+  agentPersonaRemovalQuestion,
+} from "@t3tools/client-runtime/j5/agent-personas";
+import * as Dialog from "../../components/ui/Dialog";
 import { PersonaSheet, type PersonaSheetActionRow } from "./PersonaSheet";
-import { AgentFolderPickerModal } from "./AgentFolderPickerModal";
 import { useSettingsFormNavigation } from "./SettingsFormScreen";
 import { sendWhenReconnected } from "./watchEnvironmentSessions";
 import { personaRowMarker, personaSheetActions } from "./personaSheetActions";
@@ -109,7 +112,6 @@ function OwnerAgentLibrarySettingsScreen() {
   const setLibraryFolders = useAtomCommand(agentPersonaEnvironment.setLibraryFolders, {
     reportFailure: false,
   });
-  const [pickingFolder, setPickingFolder] = useState(false);
   const [busy, setBusy] = useState(false);
   // A session that may not change the library can still read and export it.
   const canOperate = useAtomValue(
@@ -390,7 +392,19 @@ function OwnerAgentLibrarySettingsScreen() {
                   label: "Remove",
                   tone: "danger" as const,
                   disabled: locked,
-                  onPress: () => void removePersona(id),
+                  onPress: () => {
+                    // A folder persona comes back with Restore; anything else is deleted.
+                    if (!viewedPersona.imported) {
+                      void removePersona(id);
+                      return;
+                    }
+                    Dialog.confirm({
+                      ...agentPersonaRemovalQuestion(viewedPersona.displayName),
+                      confirmText: "Remove",
+                      destructive: true,
+                      onConfirm: () => void removePersona(id),
+                    });
+                  },
                 },
               ];
             case "restore":
@@ -426,7 +440,7 @@ function OwnerAgentLibrarySettingsScreen() {
       ]}
     >
       {confirmation ? (
-        <AgentImportConflictModal
+        <AgentImportConflictSheet
           key={JSON.stringify(confirmation.error.conflicts)}
           error={confirmation.error}
           onConfirm={(selected) => {
@@ -587,7 +601,13 @@ function OwnerAgentLibrarySettingsScreen() {
               icon="plus"
               label="Add folder"
               disabled={locked}
-              onPress={() => setPickingFolder(true)}
+              onPress={() => {
+                if (effectiveEnvironmentId !== null)
+                  navigation.navigate("SettingsPersonaFolder", {
+                    environmentId: effectiveEnvironmentId,
+                    environmentLabel,
+                  });
+              }}
             />
           </SettingsSection>
         ) : null}
@@ -603,17 +623,6 @@ function OwnerAgentLibrarySettingsScreen() {
       </ScreenScrollView>
       {notification ? (
         <AgentLibraryToast notification={notification} onDismiss={dismissNotification} />
-      ) : null}
-      {pickingFolder && effectiveEnvironmentId ? (
-        <AgentFolderPickerModal
-          environmentId={effectiveEnvironmentId}
-          environmentLabel={environmentLabel}
-          onClose={() => setPickingFolder(false)}
-          onSelect={(path) => {
-            setPickingFolder(false);
-            void saveFolders([...folders.map(({ configuredPath }) => configuredPath), path]);
-          }}
-        />
       ) : null}
       {viewedPersona && effectiveEnvironmentId ? (
         <PersonaSheet
