@@ -529,9 +529,10 @@ const spawnOnPeer = Effect.fn("j5.a2a.spawnOnPeer")(function* (
         authors_partly_unknown: authors.partlyUnknown,
       } satisfies J5LinkedSpawnFacts,
     },
-    // A person's pick runs as saved there, capped by the link's own level alone.
+    // A persona never runs there above the link or the thread it is asked from, a person's pick
+    // included (Jackson, 2026-11-27).
     limits: {
-      runtimeMode: pickSource === "person" ? "full-access" : callerAccess.runtimeMode,
+      runtimeMode: pickSource === "person" ? thread.runtimeMode : callerAccess.runtimeMode,
       interactionMode: thread.interactionMode,
     },
     sender: { environmentId: scope.environmentId, threadId: thread.id, title: thread.title },
@@ -850,7 +851,7 @@ const spawn = Effect.fn("j5.a2a.spawnAgent")(function* (
                   },
           blockedElsewhere: linked !== undefined,
         });
-  // A person's pick runs as saved, but never above the level the link was approved at.
+  // A person's pick runs as saved, but never above the link and the asking thread's modes.
   if (persona !== undefined && linked !== undefined) {
     const exceeded = exceededDispatchModeLimit(limits, {
       runtimeMode: persona.runtimeMode,
@@ -858,8 +859,8 @@ const spawn = Effect.fn("j5.a2a.spawnAgent")(function* (
     });
     if (exceeded !== undefined)
       return yield* stateError(
-        `Persona ${personaId} runs in ${persona.runtimeMode}, broader than the link from your server allows here (${limits.runtimeMode}).`,
-        "Retry with a persona within that level, or link the machines again with broader access.",
+        `Persona ${personaId} runs in ${persona.runtimeMode}, broader than the link from your machine and your thread's own mode allow here (${limits.runtimeMode}).`,
+        "Retry with a persona within that level, ask from a thread that runs with more access, or link the machines again with broader access.",
       );
   }
   // A plain agent's selection is required above, and a persona's comes from its pick.

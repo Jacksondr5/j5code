@@ -217,6 +217,17 @@ const callerThread = (threadId: ThreadId, runtimeMode: RuntimeMode = "full-acces
     runs: [],
   }) as unknown as OrchestrationV2ThreadProjection;
 
+/** The caller mid-turn on a message a person typed, which is what makes a persona the person's pick. */
+const withPersonTurn = (projection: OrchestrationV2ThreadProjection, text: string) =>
+  ({
+    ...projection,
+    runs: [{ id: "run:turn", ordinal: 1, status: "running", userMessageId: "message:turn" }],
+    subagents: [],
+    messages: [
+      { id: "message:turn", text, createdBy: "user", creationSource: "web", attachments: [] },
+    ],
+  }) as unknown as OrchestrationV2ThreadProjection;
+
 const spawnHarness = (input: {
   readonly checkout: FakeCheckout;
   readonly replay?: Layer.Layer<RequestReplayService.RequestReplayService>;
@@ -231,6 +242,8 @@ const spawnHarness = (input: {
   readonly liveCaller?: Ref.Ref<OrchestrationV2ThreadProjection>;
   /** The agent an earlier attempt of the same request already created, in this mode. */
   readonly existingChildRuntimeMode?: RuntimeMode;
+  /** What a person typed to start the caller's running turn; the caller has no turn otherwise. */
+  readonly callerTurnText?: string;
   /** Runs inside each read of the target project, so a test can hold a call before its start. */
   readonly beforeProjectRead?: Effect.Effect<void>;
   /** Who calls; the thread caller unless a test calls as an outside agent. */
@@ -290,7 +303,12 @@ const spawnHarness = (input: {
                     ...callerThread(threadId),
                     thread: { ...callerThread(threadId).thread, ...create, id: threadId },
                   }
-                : callerThread(threadId, input.callerRuntimeMode);
+                : threadId === invocation.thread.threadId && input.callerTurnText !== undefined
+                  ? withPersonTurn(
+                      callerThread(threadId, input.callerRuntimeMode),
+                      input.callerTurnText,
+                    )
+                  : callerThread(threadId, input.callerRuntimeMode);
             }),
           );
     const peer = input.peer;
@@ -2744,3 +2762,26 @@ function withoutModel<A extends { provider?: unknown; model?: unknown; reasoning
   const { provider: _provider, model: _model, reasoning: _reasoning, ...rest } = args;
   return rest;
 }
+
+it.effect("holds a person's pick on another machine to the thread it is asked from", () =>
+  Effect.gen(function* () {
+    // Jackson, 2026-11-27: a persona never runs there above the link or the asking thread.
+    const harness = yield* spawnHarness({
+      checkout: { isRepo: false, refName: null },
+      callerRuntimeMode: "approval-required",
+      callerTurnText: "@persona:reviewer review the change",
+      peer: { answer: Effect.succeed(remoteResult) },
+    });
+    yield* Effect.gen(function* () {
+      const spawned = yield* harness.call({ ...withoutModel(remoteArgs), persona: "reviewer" });
+      assert.isFalse(spawned.isFailure, JSON.stringify(spawned.result));
+      const [sent] = yield* Ref.get(harness.peerCalls);
+      assert.deepInclude(sent?.arguments.linked_spawn, { pick_source: "person" });
+      // The other machine caps the pick by this limit, refusing a persona broader than it.
+      assert.deepStrictEqual(sent?.limits, {
+        runtimeMode: "approval-required",
+        interactionMode: "default",
+      });
+    }).pipe(Effect.provide(harness.layer));
+  }),
+);
