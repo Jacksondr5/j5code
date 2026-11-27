@@ -153,7 +153,7 @@ export class SignInSessionsLiveError extends Schema.TaggedError<SignInSessionsLi
   { sessionIds: Schema.Array(Schema.String), cause: Schema.optional(Schema.Defect()) },
 ) {
   override get message(): string {
-    return `These sign-in sessions are still live: ${this.sessionIds.join(", ")}. End them by hand in Sharing & access, then try again.`;
+    return `Sign-in was ended, but these sessions are still live: ${this.sessionIds.join(", ")}. End each one by hand in Sharing & access.`;
   }
 }
 
@@ -666,7 +666,8 @@ const make = Effect.gen(function* () {
       FROM j5_identity_account AS account
       JOIN j5_a2a_human_person AS person
         ON person.person_id = account.person_id AND person.removed_at IS NULL
-      WHERE account.refresh_token IS NOT NULL
+      -- A lapsed account is not refreshed, so its cleanup finishes before anything confirms it.
+      WHERE account.refresh_token IS NOT NULL AND account.sign_in_ended_at IS NULL
     `.pipe(Effect.mapError(storage("read the accounts to confirm")));
     yield* Effect.forEach(
       confirming,
@@ -738,7 +739,9 @@ const make = Effect.gen(function* () {
       SET unanswered_passes = ${answeredNow ? sql`0` : sql`unanswered_passes + 1`}
       RETURNING unanswered_passes
     `.pipe(Effect.mapError(storage("count passes J5 Connect did not answer")));
-    const silentForADay = (counted?.unanswered_passes ?? 0) > PASSES_IN_A_LAPSE;
+    // Each start runs a pass, so a restart while J5 Connect is silent counts as one: it fails
+    // closed.
+    const silentForADay = (counted?.unanswered_passes ?? 0) >= PASSES_IN_A_LAPSE;
     if (answeredNow || silentForADay) yield* sweep();
   }).pipe(Effect.withSpan("j5.identity.confirmAll"));
 

@@ -502,12 +502,19 @@ const make = Effect.gen(function* () {
     }),
 
     endMcpApprovals: Effect.fn("j5.sharing.access.endMcpApprovals")(function* (personId) {
-      yield* committedRenewing(({ end }) =>
-        Effect.gen(function* () {
-          if (snapshotOf(yield* people.listLevels(personId)).owner) yield* voidWaitingMcpApprovals;
-          yield* endApprovedMcpClients(personId, end);
-        }),
-      );
+      if (snapshotOf(yield* people.listLevels(personId)).owner) yield* voidWaitingMcpApprovals;
+      // Ended first and forgotten after, so a client whose revoke fails is found again next time.
+      const approved = yield* sql<{ readonly session_id: AuthSessionId }>`
+        SELECT session_id FROM j5_a2a_mcp_client_approver WHERE person_id = ${personId}
+      `.pipe(Effect.mapError(mcpStorage("read the MCP clients a person approved")));
+      const sessionIds = approved.map((row) => row.session_id);
+      yield* endAll(sessionIds, true);
+      for (const sessionId of sessionIds) {
+        yield* sql`
+          DELETE FROM j5_a2a_mcp_client_approver
+          WHERE person_id = ${personId} AND session_id = ${sessionId}
+        `.pipe(Effect.mapError(mcpStorage("forget an ended MCP client")));
+      }
     }),
 
     rename: Effect.fn("j5.sharing.access.rename")(function* (input) {

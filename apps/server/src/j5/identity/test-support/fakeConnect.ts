@@ -25,6 +25,8 @@ interface User {
   readonly email: string;
   readonly name: string;
   active: boolean;
+  /** Whether J5 Connect says the email is verified; it does unless told otherwise. */
+  readonly emailVerified?: boolean;
 }
 
 interface Code {
@@ -60,8 +62,12 @@ export interface FakeConnectShape {
   stalled: Deferred.Deferred<void> | null;
   /** A refresh answers 200 with no ID token. */
   refreshWithoutIdToken: boolean;
-  /** Discovery names its endpoints over plain HTTP. */
-  plainHttpEndpoints: boolean;
+  /** A sign-in comes back with no refresh token, as when the connector lacks `offline_access`. */
+  withoutOfflineAccess: boolean;
+  /** Discovery names its token endpoint over plain HTTP: to an outside name, or to loopback. */
+  plainHttpEndpoint: "outside" | "loopback" | null;
+  /** Discovery answers 500, as a J5 Connect that is up but broken does. */
+  discoveryBroken: boolean;
   /** The next code exchange waits at this gate. */
   codeGate: Gate | null;
   /** Overrides on the next ID token's claims, to make one that must not be trusted. */
@@ -103,7 +109,9 @@ const make = Effect.promise(async () => {
     stall: new Set(),
     stalled: null,
     refreshWithoutIdToken: false,
-    plainHttpEndpoints: false,
+    withoutOfflineAccess: false,
+    plainHttpEndpoint: null,
+    discoveryBroken: false,
     codeGate: null,
     nextClaims: null,
     signIn: (authorizationUrl, subject) => {
@@ -131,6 +139,7 @@ const make = Effect.promise(async () => {
       aud: CLIENT_ID,
       exp: 9_999_999_999,
       email: user.email,
+      email_verified: user.emailVerified ?? true,
       name: user.name,
       ...(nonce === undefined ? {} : { nonce }),
       ...fake.nextClaims,
@@ -145,14 +154,19 @@ const make = Effect.promise(async () => {
     return `${signed}.${Buffer.from(signature).toString("base64url")}`;
   };
 
-  const tokens = async (subject: string, nonce: string | undefined, withIdToken = true) => {
+  const tokens = async (
+    subject: string,
+    nonce: string | undefined,
+    withIdToken = true,
+    withRefreshToken = true,
+  ) => {
     const refreshToken = random();
     refreshTokens.set(refreshToken, subject);
     return json({
       access_token: random(),
       token_type: "bearer",
       ...(withIdToken ? { id_token: await idToken(subject, nonce) } : {}),
-      refresh_token: refreshToken,
+      ...(withRefreshToken ? { refresh_token: refreshToken } : {}),
     });
   };
 
@@ -178,7 +192,7 @@ const make = Effect.promise(async () => {
       if (code.returnUrl !== body.get("redirect_uri") || challenge !== code.challenge) {
         return json({ error: "invalid_grant" }, 400);
       }
-      return tokens(code.subject, code.nonce);
+      return tokens(code.subject, code.nonce, true, !fake.withoutOfflineAccess);
     }
     if (body.get("grant_type") === "refresh_token") {
       const presented = body.get("refresh_token") ?? "";
@@ -202,7 +216,13 @@ const make = Effect.promise(async () => {
   ): Promise<Response | "stall"> => {
     if (url.origin !== ISSUER) return new Response("not found", { status: 404 });
     if (method === "GET" && url.pathname === "/.well-known/openid-configuration") {
-      const base = fake.plainHttpEndpoints ? ISSUER.replace("https:", "http:") : ISSUER;
+      if (fake.discoveryBroken) return json({ error: "server_error" }, 500);
+      const base =
+        fake.plainHttpEndpoint === "outside"
+          ? ISSUER.replace("https:", "http:")
+          : fake.plainHttpEndpoint === "loopback"
+            ? "http://127.0.0.1:5556"
+            : ISSUER;
       return json({
         issuer: ISSUER,
         authorization_endpoint: `${ISSUER}/auth`,

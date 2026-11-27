@@ -262,20 +262,39 @@ const make: Layer.Layer<PairingIntents, never, SqlClient.SqlClient | ReadChanges
               if (!live) return yield* new PairingIntentError({ reason: "no_person" });
               return;
             }
-            // A device paired from a signed-in one is that sign-in's too, so offboarding the
-            // account reaches it (J5 Connect, Offboarding).
-            const creatorSignIn = yield* sql<{ readonly sign_in_account_id: string | null }>`
-              SELECT sign_in_account_id FROM j5_a2a_person_session
-              WHERE session_id = ${input.creator.sessionId}
-            `.pipe(Effect.mapError(storage));
-            yield* record({
-              pairingLinkId: input.pairingLinkId,
-              credential: input.credential,
-              personId: reach.person.personId,
-              linkId: null,
-              signInAccountId: creatorSignIn[0]?.sign_in_account_id ?? null,
-              ceiling: input.scopes,
-            });
+            // The person and the sign-in come from one read of the maker's binding, recorded only
+            // while it holds: a device paired from a signed-in one is that sign-in's too, so
+            // offboarding the account reaches it (J5 Connect, Offboarding). Only the first owner's
+            // own devices hold their person without a binding.
+            yield* sql
+              .withTransaction(
+                Effect.gen(function* () {
+                  const [binding] = yield* sql<{
+                    readonly person_id: string;
+                    readonly sign_in_account_id: string | null;
+                  }>`
+                    SELECT person_id, sign_in_account_id FROM j5_a2a_person_session
+                    WHERE session_id = ${input.creator.sessionId}
+                  `;
+                  if (binding === undefined && !FIRST_OWNER_SUBJECTS.has(input.creator.subject)) {
+                    return yield* new PairingIntentError({ reason: "no_person" });
+                  }
+                  yield* record({
+                    pairingLinkId: input.pairingLinkId,
+                    credential: input.credential,
+                    personId:
+                      binding === undefined
+                        ? reach.person.personId
+                        : ParticipantId.make(binding.person_id),
+                    linkId: null,
+                    signInAccountId: binding?.sign_in_account_id ?? null,
+                    ceiling: input.scopes,
+                  });
+                }),
+              )
+              .pipe(
+                Effect.mapError((error) => (isPairingIntentError(error) ? error : storage(error))),
+              );
           },
         ),
 

@@ -225,10 +225,14 @@ it.effect("joining checks the client's secret and every return address before it
       join(FakeConnect.CLIENT_SECRET, "http://connect.example.test"),
     );
     assert.strictEqual(plain._tag, "OidcError");
-    connect.plainHttpEndpoints = true;
     connect.returnUrls.add(missing.toRegister[0]!);
-    assert.strictEqual((yield* Effect.flip(join(FakeConnect.CLIENT_SECRET)))._tag, "OidcError");
-    connect.plainHttpEndpoints = false;
+    // Nor to an endpoint over plain HTTP, even on loopback, under an HTTPS issuer.
+    for (const plainHttpEndpoint of ["outside", "loopback"] as const) {
+      connect.plainHttpEndpoint = plainHttpEndpoint;
+      const refused = yield* Effect.flip(join(FakeConnect.CLIENT_SECRET));
+      assert.strictEqual(refused._tag, "OidcError", plainHttpEndpoint);
+    }
+    connect.plainHttpEndpoint = null;
 
     const done = yield* join(FakeConnect.CLIENT_SECRET);
     assert.deepStrictEqual(done.returnUrls, missing.toRegister);
@@ -621,18 +625,23 @@ it.effect("waking with no network lapses no one; a day of passes with no answer 
     yield* grantAda;
     const { sessionId } = yield* pairedBrowser("ada");
 
-    // Asleep for 30 hours, then a pass before the network is up, then one after.
+    // Asleep for 30 hours, then passes before the network is up, or while J5 Connect only
+    // answers with a server error, then one once it answers.
     yield* TestClock.adjust("30 hours");
     connect.down = true;
     yield* identity.confirmAll;
     assert.isTrue(yield* isLive(sessionId));
     connect.down = false;
+    connect.discoveryBroken = true;
+    yield* identity.confirmAll;
+    assert.isTrue(yield* isLive(sessionId));
+    connect.discoveryBroken = false;
     yield* passes(1);
     assert.isTrue(yield* isLive(sessionId));
 
-    // Unreachable for a day of hourly passes: it fails closed.
+    // Unreachable for a day of hourly passes: it fails closed on the 24th.
     connect.down = true;
-    yield* passes(24);
+    yield* passes(23);
     assert.isTrue(yield* isLive(sessionId));
     yield* passes(1);
     assert.isFalse(yield* isLive(sessionId));
@@ -649,15 +658,42 @@ it.effect("a restart in the middle of an outage keeps counting the passes with n
     yield* passes(12);
     // The server restarts: a new Identity over the same database.
     const restarted = Context.get(yield* Layer.build(Identity.layer), Identity.Identity);
-    for (let hour = 0; hour < 12; hour += 1) {
+    for (let hour = 0; hour < 11; hour += 1) {
       yield* TestClock.adjust("1 hour");
       yield* restarted.confirmAll;
     }
     assert.isTrue(yield* isLive(sessionId));
+    // The 24th pass with no answer, counting those before the restart.
     yield* TestClock.adjust("1 hour");
     yield* restarted.confirmAll;
     assert.isFalse(yield* isLive(sessionId));
   }).pipe(Effect.scoped, Effect.provide(makeLayer())),
+);
+
+it.effect("a sign-in without offline access is refused, and an unverified email is not kept", () =>
+  Effect.gen(function* () {
+    const identity = yield* Identity.Identity;
+    const connect = yield* FakeConnect.FakeConnect;
+    yield* joined;
+    yield* addUser("grace", "Grace");
+    connect.withoutOfflineAccess = true;
+    const refused = yield* Effect.flip(signIn("grace"));
+    assert.strictEqual(refused._tag, "OidcError");
+    assert.include(refused.message, "offline access");
+    assert.strictEqual((yield* identity.state).requests.length, 0);
+    connect.withoutOfflineAccess = false;
+
+    connect.users.set("hopper", {
+      email: "hopper@example.test",
+      name: "Hopper",
+      active: true,
+      emailVerified: false,
+    });
+    assert.deepStrictEqual(yield* signIn("hopper"), { kind: "waiting" });
+    const [request] = (yield* identity.state).requests;
+    assert.strictEqual(request!.name, "Hopper");
+    assert.isNull(request!.email);
+  }).pipe(Effect.provide(makeLayer())),
 );
 
 it.effect("leaving clears bindings and requests and ends every sign-in session", () =>

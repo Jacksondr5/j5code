@@ -41,8 +41,12 @@ export class OidcError extends Schema.TaggedError<OidcError>()("OidcError", {
   }
 }
 
-/** Whether the J5 Connect gave any answer, as opposed to none: unreachable or too slow. */
-export const answered = (error: OidcError) => error.status !== undefined;
+/**
+ * Whether the J5 Connect gave an answer, as opposed to none: unreachable, too slow, or a server
+ * error, which says nothing about the accounts it vouches for.
+ */
+export const answered = (error: OidcError) =>
+  error.status !== undefined && !/^5\d\d\b/.test(error.status);
 
 /** Each request, its body included, ends by this, so a stalled J5 Connect holds nothing up. */
 const REQUEST_TIMEOUT = "15 seconds";
@@ -90,6 +94,7 @@ const IdTokenClaims = Schema.Struct({
   azp: Schema.optional(Schema.String),
   nonce: Schema.optional(Schema.String),
   email: Schema.optional(Schema.String),
+  email_verified: Schema.optional(Schema.Boolean),
   name: Schema.optional(Schema.String),
 });
 
@@ -183,12 +188,15 @@ export const discover = Effect.fn("j5.identity.oidc.discover")(function* (issuer
   if (document.issuer !== issuer) {
     return yield* new OidcError({ stage: "discovery", status: "issuer mismatch" });
   }
+  // A J5 Connect served over HTTPS names only HTTPS endpoints; plain HTTP to this machine is for a
+  // J5 Connect that is itself on this machine.
+  const issuerIsHttps = new URL(issuer).protocol === "https:";
   for (const endpoint of [
     document.authorization_endpoint,
     document.token_endpoint,
     document.jwks_uri,
   ]) {
-    if (!isSafeOidcUrl(endpoint)) {
+    if (!isSafeOidcUrl(endpoint) || (issuerIsHttps && new URL(endpoint).protocol !== "https:")) {
       return yield* new OidcError({ stage: "discovery", status: "endpoint is not https" });
     }
   }
@@ -340,7 +348,8 @@ const verifyIdToken = Effect.fn("j5.identity.oidc.verifyIdToken")(function* (inp
   return {
     issuer: claims.iss,
     subject: claims.sub,
-    email: claims.email ?? null,
+    // An email J5 Connect has not verified is never shown as who someone is.
+    email: claims.email_verified === true ? (claims.email ?? null) : null,
     name: claims.name ?? null,
   } satisfies Identity;
 });
@@ -377,7 +386,15 @@ export const exchangeCode = Effect.fn("j5.identity.oidc.exchangeCode")(function*
     nonce: input.nonce,
     nowMillis: input.nowMillis,
   });
-  return { identity, refreshToken: tokens.refresh_token ?? null };
+  // Every bound account is confirmed by refresh, so a sign-in without one is refused.
+  if (tokens.refresh_token === undefined) {
+    return yield* new OidcError({
+      stage: "token",
+      status:
+        "no refresh token: J5 Connect didn't grant offline access; check its connector config",
+    });
+  }
+  return { identity, refreshToken: tokens.refresh_token };
 });
 
 /**
