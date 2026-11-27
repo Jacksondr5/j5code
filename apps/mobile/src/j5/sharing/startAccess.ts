@@ -41,13 +41,14 @@ const startsAtom = Atom.make((get) => {
 const savedServersAllow = (label: string, allows: (access: KnownConnectionAccess) => boolean) =>
   Atom.make((get) =>
     someServerAllowsStart(
-      [...get(environmentCatalog.catalogValueAtom).entries.keys()].map((id) => {
+      [...get(environmentCatalog.catalogValueAtom).entries].map(([id, entry]) => {
         const session = get(environmentSession.sessionStateAtom(id));
         return {
           access: get(j5Sharing.connectionAccess(id)),
           operates:
             AsyncResult.isInitial(session) ||
             sessionHasScope(session, AuthOrchestrationOperateScope),
+          enabled: entry.enabled,
         };
       }),
       allows,

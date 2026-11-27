@@ -77,6 +77,7 @@ import { buildThreadTitleRegenerationMenuItems } from "./thread-title-regenerati
 import { canTurnThreadIntoProject, turnThreadIntoProject } from "./turnThreadIntoProject";
 import { threadCanArchive } from "../home/threadArchive";
 import { useCanShareWithGuest } from "./useCanShareWithGuest";
+import { useCanStartTaskIn } from "../../j5/sharing/startAccess";
 import {
   THREAD_LIST_V2_SETTLED_PAGE_COUNT,
   resolveThreadListV2SnoozeGateExpiryMs,
@@ -933,6 +934,8 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   const handleRename = useCallback(() => onRenameThread(thread), [onRenameThread, thread]);
   const canOperateThread = useEnvironmentScope(thread.environmentId, AuthOrchestrationOperateScope);
   const canShareWithGuest = useCanShareWithGuest(thread.environmentId);
+  // J5: a new thread on the branch is offered only where the person may start one (FORK.md case 90).
+  const canStartOnBranch = useCanStartTaskIn(thread.environmentId, thread.projectId);
   const navigation = useNavigation();
   const handleRegenerateTitle = useCallback(
     () => onRegenerateThreadTitle(thread),
@@ -1100,7 +1103,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     const nested = Platform.OS === "ios";
     const localized = (action: MenuAction): MenuAction => ({ ...action, title: m(action.title) });
     const direct: MenuAction[] = [
-      ...(thread.branch
+      ...(thread.branch && canStartOnBranch
         ? [
             {
               id: "new-thread-on-branch",
@@ -1194,6 +1197,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   }, [
     autoSettleMenuItems,
     canShareWithGuest,
+    canStartOnBranch,
     canUnsettle,
     pinMenuItems,
     props.settlementSupported,

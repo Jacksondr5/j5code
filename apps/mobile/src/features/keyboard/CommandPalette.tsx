@@ -55,6 +55,11 @@ import {
 import { useThreadSearch } from "../../state/queries";
 import { requestThreadMessageJump } from "../threads/threadMessageJump";
 import { useCanShareWithGuest } from "../threads/useCanShareWithGuest";
+import {
+  useAddsProjectSomewhere,
+  useStartableProjects,
+  useStartsSomewhere,
+} from "../../j5/sharing/startAccess";
 import { threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { serverEnvironment } from "../../state/server";
@@ -233,6 +238,9 @@ export function CommandPalette(props: {
   const selectDetail = useSelectWorkspaceDetail();
   const runCommand = props.onCommand;
   const projects = useProjects();
+  const startableProjects = useStartableProjects(projects);
+  const startsSomewhere = useStartsSomewhere();
+  const addsProject = useAddsProjectSomewhere();
   const threads = useVisibleThreadShells();
   const delegatedUnderParent = useDelegatedUnderParent();
   const activeThreadRef = parseActiveThreadPath(props.pathname);
@@ -377,7 +385,7 @@ export function CommandPalette(props: {
     const activeProject = activeThread
       ? projectByKey.get(scopedProjectKey(activeThread.environmentId, activeThread.projectId))
       : null;
-    if (activeProject) {
+    if (activeProject && startableProjects.includes(activeProject)) {
       actions.unshift({
         key: "newThread",
         kind: "action",
@@ -423,7 +431,7 @@ export function CommandPalette(props: {
         });
       }
     }
-    const openProjects = projects.filter((project) => project.archivedAt == null);
+    const openProjects = startableProjects.filter((project) => project.archivedAt == null);
     const projectItems: CommandPaletteItem[] = [
       ...openProjects.filter((project) => project.pinnedAt != null),
       ...openProjects.filter((project) => project.pinnedAt == null),
@@ -492,7 +500,11 @@ export function CommandPalette(props: {
         (right.threadSearch ? threadRecentUse(right.threadSearch) : 0) -
         (left.threadSearch ? threadRecentUse(left.threadSearch) : 0),
     );
-    return [...actions, ...projectItems, ...threadItems];
+    // J5: New thread and Add project are offered only to someone who may use them (FORK.md case 90).
+    const offered = actions.filter(
+      ({ key }) => (key !== "newTask" || startsSomewhere) && (key !== "addProject" || addsProject),
+    );
+    return [...offered, ...projectItems, ...threadItems];
   }, [
     selectTab,
     activeThread,
@@ -502,6 +514,9 @@ export function CommandPalette(props: {
     canShareWithGuest,
     navigation,
     projects,
+    startableProjects,
+    startsSomewhere,
+    addsProject,
     runCommand,
     savedConnectionsById,
     selectDetail,

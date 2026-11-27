@@ -352,6 +352,16 @@ describe("what a connection may start", () => {
           allows,
         ),
       ).toBe(true);
+      // A server switched off never answers, so its unanswered access opens no door.
+      expect(
+        someServerAllowsStart(
+          [
+            { access: null, operates: true, enabled: false },
+            { access: SERVER_VIEWER, operates: true },
+          ],
+          allows,
+        ),
+      ).toBe(false);
     }
   });
 });

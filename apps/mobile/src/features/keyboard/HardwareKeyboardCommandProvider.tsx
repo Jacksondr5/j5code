@@ -16,6 +16,7 @@ import {
 } from "react";
 
 import { copyThreadReference } from "../../lib/copyThreadReference";
+import { useStartsSomewhere } from "../../j5/sharing/startAccess";
 import { m } from "../../i18n/messages";
 import {
   firstWorkspaceDetailOpen,
@@ -58,6 +59,8 @@ export function HardwareKeyboardCommandProvider({
   const messages = useMessages();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const closePalette = useCallback(() => setPaletteOpen(false), []);
+  // J5: New thread's shortcut is offered only to someone who may start one (FORK.md case 90).
+  const startsSomewhere = useStartsSomewhere();
   const activeThreadRef = useMemo(() => parseActiveThreadPath(pathname), [pathname]);
   const activeThread = useThreadShell(activeThreadRef);
   const copyTarget = useMemo(
@@ -112,7 +115,8 @@ export function HardwareKeyboardCommandProvider({
   );
   const enabledCommands = useMemo(() => {
     const commands = new Set<HardwareKeyboardCommand>(getRegisteredHardwareKeyboardCommands());
-    commands.add("newTask");
+    if (startsSomewhere) commands.add("newTask");
+    else commands.delete("newTask");
     commands.add("commandPalette");
     if (pathname !== "/" && !pathname.startsWith("/threads/")) {
       for (const command of commands) {
@@ -128,7 +132,7 @@ export function HardwareKeyboardCommandProvider({
     }
     return [...commands];
     // oxlint-disable-next-line react/memo-dependencies -- registrationVersion invalidates the snapshot of the external keyboard-command registry.
-  }, [activeThreadRef, pathname, registrationVersion, navigation]);
+  }, [activeThreadRef, pathname, registrationVersion, navigation, startsSomewhere]);
 
   const onCommand = useCallback(
     (command: HardwareKeyboardCommand) => {
