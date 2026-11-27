@@ -423,7 +423,7 @@ export const exchangeCode = Effect.fn("j5.identity.oidc.exchangeCode")(function*
     nowMillis: input.nowMillis,
   });
   // Every bound account is confirmed by refresh, so a sign-in without one is refused.
-  if (tokens.refresh_token === undefined) {
+  if (tokens.refresh_token === undefined || tokens.refresh_token === "") {
     return yield* new OidcError({
       stage: "token",
       status:
@@ -465,7 +465,8 @@ export const refresh = Effect.fn("j5.identity.oidc.refresh")(function* (input: {
   if (identity.subject !== input.subject) {
     return yield* new OidcError({ stage: "id_token", status: "subject", httpStatus: 200 });
   }
-  return tokens.refresh_token ?? input.refreshToken;
+  // An empty token is none: the one kept stays.
+  return tokens.refresh_token || input.refreshToken;
 });
 
 /**

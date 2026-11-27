@@ -68,6 +68,7 @@ import {
   formatDesktopSshConnectionError,
 } from "./ConnectionsSettings.logic";
 import { noteEnvironmentAdded } from "../../j5/links/addedEnvironment";
+import { SignInToAddServer } from "../../j5/sharing/SignInToAddServer";
 
 const SSH_PROTOCOL_NAME = "SSH";
 const EMPTY_DISCOVERED_SSH_HOSTS: ReadonlyArray<DesktopDiscoveredSshHost> = [];
@@ -449,6 +450,10 @@ export function AddEnvironmentDialog({
           <T>Paste a full pairing URL here to fill both fields automatically.</T>
         </span>
       </div>
+      {/* J5: sign in at the server instead, through the system browser (FORK.md case 123). */}
+      {routeTarget === null ? (
+        <SignInToAddServer host={savedBackendHost} disabled={isAddingSavedBackend} />
+      ) : null}
     </div>
   );
   const relayRouteOffer =

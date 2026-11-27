@@ -40,6 +40,7 @@ import { ParticipantPlacementService } from "./PlacementService.ts";
 import { COALESCE_WINDOW, ReadChanges, layer as readChangesLayer } from "./ReadChanges.ts";
 import { A2AParticipantNotFoundError } from "./SendService.ts";
 import { ParticipantId, LedgerProjectId } from "./contracts.ts";
+import { Identity } from "../identity/Identity.ts";
 import { PersonAccess } from "../sharing/PersonAccess.ts";
 import { SharedThreads } from "../sharing/SharedThreads.ts";
 
@@ -50,7 +51,10 @@ const LOCAL_PERSON = ParticipantId.make("human:local-operator");
 const SESSION = {
   sessionId: AuthSessionId.make("session:client-reads"),
   subject: "one-time-token",
+  scopes: [AuthAccessReadScope],
 };
+/** An Owner's device paired without upstream's permission to see who has access. */
+const NARROWED_SESSION = { ...SESSION, scopes: [] };
 
 /** A connection that is the given person's device at a level of the server, or no one's. */
 const connectionOf = (personId: ParticipantId | null, level: "owner" | "collaborator" = "owner") =>
@@ -78,8 +82,10 @@ const handlersOver = (
   reads: Layer.Layer<ClientReadsService, SqlError>,
   personId: ParticipantId | null = LOCAL_PERSON,
   level: "owner" | "collaborator" = "owner",
+  session: typeof SESSION = SESSION,
+  waitingRequests = 0,
 ) =>
-  makeClientReadRpcHandlers(SESSION).pipe(
+  makeClientReadRpcHandlers(session).pipe(
     Effect.provide(
       Layer.mergeAll(
         reads,
@@ -87,6 +93,8 @@ const handlersOver = (
         readChangesLayer,
         connectionOf(personId, level),
         writesEverywhere,
+        // Accounts waiting to be let in through J5 Connect.
+        Layer.mock(Identity)({ waitingRequestCount: Effect.succeed(waitingRequests) }),
       ),
     ),
   );
@@ -252,8 +260,12 @@ const cleanupReads = Layer.mock(ClientReadsService)({
 
 it.effect("counts and lists an open worktree cleanup for an Owner, who answers it", () =>
   Effect.gen(function* () {
-    const handlers = yield* handlersOver(cleanupReads);
-    assert.strictEqual((yield* handlers[METHODS.readOpenInboxCount]({})).count, 4);
+    const handlers = yield* handlersOver(cleanupReads, LOCAL_PERSON, "owner", SESSION, 2);
+    // Three asks, one cleanup, and two accounts waiting to be let in.
+    assert.strictEqual((yield* handlers[METHODS.readOpenInboxCount]({})).count, 6);
+    // An Owner's device that may not see who has access isn't shown the requests, nor counts them.
+    const narrowed = yield* handlersOver(cleanupReads, LOCAL_PERSON, "owner", NARROWED_SESSION, 2);
+    assert.strictEqual((yield* narrowed[METHODS.readOpenInboxCount]({})).count, 4);
     assert.deepStrictEqual(yield* handlers[METHODS.listCrewWorktreeCleanups]({ status: "open" }), {
       items: [openCleanup],
     });
@@ -262,7 +274,7 @@ it.effect("counts and lists an open worktree cleanup for an Owner, who answers i
 
 it.effect("neither counts nor lists a worktree cleanup for someone who cannot answer it", () =>
   Effect.gen(function* () {
-    const handlers = yield* handlersOver(cleanupReads, LOCAL_PERSON, "collaborator");
+    const handlers = yield* handlersOver(cleanupReads, LOCAL_PERSON, "collaborator", SESSION, 2);
     assert.strictEqual((yield* handlers[METHODS.readOpenInboxCount]({})).count, 3);
     assert.deepStrictEqual(yield* handlers[METHODS.listCrewWorktreeCleanups]({ status: "open" }), {
       items: [],

@@ -86,6 +86,8 @@ import {
   useNativeQuestionInbox,
 } from "../crew/crewRuntimeRequestsClient";
 import { NativeQuestionInboxSection } from "./NativeQuestionInboxSection";
+import { InboxAccessRequests } from "../sharing/IdentitySections";
+import { ownedAccessRequestsAtom, refreshOwnedIdentities } from "../sharing/identityManage";
 import {
   CrewWorktreeCleanupSection,
   DecidedCleanupRow,
@@ -615,6 +617,7 @@ async function refreshHumanInboxes(environmentId?: EnvironmentId, force = false)
     refreshCrewRuntimeRequests(environmentId),
     refreshWorktreeCleanups(environmentId),
   ]);
+  refreshOwnedIdentities(environmentId);
   const failed = results.flat().find((result) => result._tag === "Failure");
   if (failed?._tag === "Failure") throw Cause.squash(failed.cause);
 }
@@ -697,6 +700,7 @@ export function HumanInboxPage() {
   const runtimeSources = useAtomValue(crewRuntimeRequestSourcesAtom);
   const nativeQuestions = useNativeQuestionInbox();
   const cleanups = useWorktreeCleanupInbox();
+  const accessRequests = useAtomValue(ownedAccessRequestsAtom);
   const previousOpenItems = useRef(new Map<EnvironmentId, ReadonlySet<string>>());
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- an answered item leaving the open list rereads the answered list; it reacts to data arriving, not to a handler here.
   useEffect(() => {
@@ -857,6 +861,7 @@ export function HumanInboxPage() {
               !loading &&
               shownItems.length === 0 &&
               cleanups.inPlace.length === 0 &&
+              accessRequests.length === 0 &&
               runtimeRequests.length === 0 &&
               nativeQuestions.length === 0 ? (
                 <div className="flex min-h-56 flex-col items-center justify-center px-6 py-12 text-center">
@@ -888,6 +893,8 @@ export function HumanInboxPage() {
                   ))}
                 </ol>
               )}
+
+              <InboxAccessRequests waiting={accessRequests} />
 
               <CrewWorktreeCleanupSection
                 errors={cleanups.errors}

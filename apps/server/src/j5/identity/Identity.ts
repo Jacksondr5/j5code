@@ -9,7 +9,9 @@ import {
   type IdentityDescription,
   type IdentityState,
   J5_IDENTITY_CALLBACK_PATH,
+  type J5AppLinkScheme,
   type JoinedConnect,
+  isJ5AppLinkScheme,
   type PersonLevel,
   type PersonScope,
 } from "@t3tools/contracts/j5";
@@ -168,9 +170,24 @@ export class IdentityStorageError extends Schema.TaggedError<IdentityStorageErro
 
 /** What a finished sign-in tells the device. */
 export type SignInOutcome =
-  | { readonly kind: "pair"; readonly credential: string }
-  | { readonly kind: "waiting" }
-  | { readonly kind: "not-let-in" };
+  | {
+      readonly kind: "pair";
+      readonly credential: string;
+      /** For a sign-in an app started: the `<scheme>://pair` link that takes it back there. */
+      readonly appLink: string | null;
+    }
+  /** The app that started it, when one did, so the device's next try goes back there too. */
+  | { readonly kind: "waiting"; readonly appScheme: J5AppLinkScheme | null }
+  | { readonly kind: "not-let-in"; readonly appScheme: J5AppLinkScheme | null };
+
+export class AppSchemeRefusedError extends Schema.TaggedError<AppSchemeRefusedError>()(
+  "AppSchemeRefusedError",
+  {},
+) {
+  override get message(): string {
+    return "A sign-in goes back only to the J5 Code app.";
+  }
+}
 
 const CLIENT_SECRET_NAME = "j5-connect-client-secret";
 const SIGN_IN_LIFETIME = Duration.minutes(10);
@@ -205,6 +222,8 @@ export class Identity extends Context.Service<
     readonly describe: Effect.Effect<IdentityDescription, IdentityStorageError>;
     /** The J5 Connect joined, the accounts bound and the requests waiting, for Owners. */
     readonly state: Effect.Effect<IdentityState, IdentityStorageError>;
+    /** How many accounts wait to be let in, for the Inbox's count; reads nothing else. */
+    readonly waitingRequestCount: Effect.Effect<number, IdentityStorageError>;
     /**
      * The return addresses a J5 Connect's operator registers for this server before it joins:
      * one per address it finds itself, and per one of `addresses`.
@@ -230,12 +249,20 @@ export class Identity extends Context.Service<
     >;
     /** Clears every binding and request, and ends every session that came from sign-in. */
     readonly leave: Effect.Effect<void, ChangeFailure | ServerSecretStore.SecretStoreError>;
-    /** Where a browser at `origin` goes to sign in. */
-    readonly startSignIn: (
-      origin: string,
-    ) => Effect.Effect<
+    /**
+     * Where a browser at `origin` goes to sign in. With `appScheme`, the desktop or mobile app
+     * started it in the system browser, and a sign-in that pairs goes back to that app.
+     */
+    readonly startSignIn: (input: {
+      readonly origin: string;
+      readonly appScheme: string | null;
+    }) => Effect.Effect<
       string,
-      IdentityNotJoinedError | AddressNotRegisteredError | Oidc.OidcError | IdentityStorageError
+      | IdentityNotJoinedError
+      | AddressNotRegisteredError
+      | AppSchemeRefusedError
+      | Oidc.OidcError
+      | IdentityStorageError
     >;
     /** Finishes a sign-in the J5 Connect sent back to `origin`, the address it started at. */
     readonly completeSignIn: (input: {
@@ -775,6 +802,16 @@ const make = Effect.gen(function* () {
       return { connect: connect === null ? null : toConnect(connect), accounts, requests };
     }).pipe(Effect.withSpan("j5.identity.state")),
 
+    // The same standing as `requestStanding`'s "waiting": unbound, asked within a week, undecided.
+    waitingRequestCount: Effect.gen(function* () {
+      const since = yield* ago(REQUEST_LIFETIME);
+      const [row] = yield* sql<{ readonly n: number }>`
+        SELECT COUNT(*) AS n FROM j5_identity_account
+        WHERE person_id IS NULL AND declined_at IS NULL AND requested_at > ${since}
+      `.pipe(Effect.mapError(storage("count the accounts waiting")));
+      return row?.n ?? 0;
+    }).pipe(Effect.withSpan("j5.identity.waitingRequestCount")),
+
     returnUrls,
 
     join: Effect.fn("j5.identity.join")(function* (input) {
@@ -836,7 +873,10 @@ const make = Effect.gen(function* () {
 
     leave,
 
-    startSignIn: Effect.fn("j5.identity.startSignIn")(function* (origin) {
+    startSignIn: Effect.fn("j5.identity.startSignIn")(function* ({ origin, appScheme }) {
+      if (appScheme !== null && !isJ5AppLinkScheme(appScheme)) {
+        return yield* new AppSchemeRefusedError({});
+      }
       const connect = yield* requireConnect;
       const returnUrl = callbackUrl(origin);
       if (!toConnect(connect).returnUrls.includes(returnUrl)) {
@@ -849,9 +889,11 @@ const make = Effect.gen(function* () {
         DateTime.add(now, { milliseconds: Duration.toMillis(SIGN_IN_LIFETIME) }),
       );
       yield* sql`
-        INSERT INTO j5_identity_sign_in (state, nonce, code_verifier, return_url, expires_at)
-        VALUES (
-          ${signIn.state}, ${signIn.nonce}, ${signIn.codeVerifier}, ${returnUrl}, ${expiresAt}
+        INSERT INTO j5_identity_sign_in (
+          state, nonce, code_verifier, return_url, app_scheme, expires_at
+        ) VALUES (
+          ${signIn.state}, ${signIn.nonce}, ${signIn.codeVerifier}, ${returnUrl}, ${appScheme},
+          ${expiresAt}
         )
       `.pipe(Effect.mapError(storage("start a sign-in")));
       return Oidc.authorizationUrl({
@@ -875,13 +917,18 @@ const make = Effect.gen(function* () {
       // Checked before the state is spent, so a wrong arrival leaves the sign-in to finish.
       if (started[0].return_url !== arrivedAt) return yield* new SignInElsewhereError({});
       // Taken once: a state replayed, or one older than ten minutes, is refused.
-      const taken = yield* sql<{ readonly nonce: string; readonly code_verifier: string }>`
+      const taken = yield* sql<{
+        readonly nonce: string;
+        readonly code_verifier: string;
+        readonly app_scheme: string | null;
+      }>`
         DELETE FROM j5_identity_sign_in
         WHERE state = ${input.state} AND expires_at > ${now} AND return_url = ${arrivedAt}
-        RETURNING nonce, code_verifier
+        RETURNING nonce, code_verifier, app_scheme
       `.pipe(Effect.mapError(storage("finish a sign-in")));
       const pending = taken[0];
       if (pending === undefined) return yield* new SignInExpiredError({});
+      const appScheme = isJ5AppLinkScheme(pending.app_scheme) ? pending.app_scheme : null;
       const connect = yield* requireConnect;
       const secret = yield* clientSecret;
       const discovery = yield* withHttp(Oidc.discover(connect.issuer));
@@ -939,14 +986,21 @@ const make = Effect.gen(function* () {
               Effect.provideService(PairingIntents, intents),
               Effect.provideService(PairingGrantStore.PairingGrantStore, grants),
             );
-            return { kind: "pair" as const, credential };
+            // The app adds the server from the same pairing link a person would scan.
+            const appLink =
+              appScheme === null
+                ? null
+                : `${appScheme}://pair?${new URLSearchParams([
+                    ["pairingUrl", `${input.origin}/#token=${encodeURIComponent(credential)}`],
+                  ])}`;
+            return { kind: "pair" as const, credential, appLink };
           }
           if (standing === "not-let-in") {
             yield* sql`
               UPDATE j5_identity_account SET refresh_token = NULL, last_confirmed_at = NULL
               WHERE account_id = ${account.account_id}
             `;
-            return { kind: "not-let-in" as const };
+            return { kind: "not-let-in" as const, appScheme };
           }
           // Waiting, or asking afresh: the confirmed token is kept on the request, so a binding
           // is confirmed from the start.
@@ -958,7 +1012,7 @@ const make = Effect.gen(function* () {
               declined_at = NULL
             WHERE account_id = ${account.account_id}
           `;
-          return { kind: "waiting" as const };
+          return { kind: "waiting" as const, appScheme };
         }),
       );
       if (outcome.kind === "waiting") yield* peopleChanged;
