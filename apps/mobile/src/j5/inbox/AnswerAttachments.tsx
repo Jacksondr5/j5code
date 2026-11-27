@@ -72,7 +72,8 @@ export function AnswerAttachRow(props: {
   if (support === null && attachments.length === 0) return null;
   return (
     <View className="gap-2" pointerEvents={props.held ? "none" : "auto"}>
-      <View className="self-start">
+      {/* The glyph sits centred in a 44 px target; its slack moves left to meet the text column. */}
+      <View className="-ml-[12px] self-start">
         <AnswerAttachButton target={props.target} disabled={props.disabled} />
       </View>
       <AnswerAttachmentStrip target={props.target} disabled={props.held} />
