@@ -9,6 +9,7 @@ import { J5_CLIENT_ACTION_WS_METHODS } from "../j5.ts";
 import { J5_AGENT_PERSONA_WS_METHODS } from "./agentPersona.ts";
 import { J5_ARTIFACT_WS_METHODS } from "./artifacts.ts";
 import { J5_ACCESS_WS_METHODS } from "./access.ts";
+import { J5_IDENTITY_WS_METHODS } from "./identity.ts";
 import { J5_PEOPLE_WS_METHODS } from "./people.ts";
 import { J5_PLAYBOOK_WS_METHODS } from "./playbook.ts";
 import { J5_SKILL_CATALOG_WS_METHODS } from "./skillCatalog.ts";
@@ -84,4 +85,12 @@ export const J5_CLIENT_GUARDED_RPC_SCOPES = {
   [J5_PEOPLE_WS_METHODS.revokeDevice]: AuthAccessWriteScope,
   [J5_PEOPLE_WS_METHODS.createLink]: AuthAccessWriteScope,
   [J5_PEOPLE_WS_METHODS.revokeLink]: AuthAccessWriteScope,
+
+  // Trusting a J5 Connect and deciding who an account is are an Owner's.
+  [J5_IDENTITY_WS_METHODS.join]: AuthAccessWriteScope,
+  [J5_IDENTITY_WS_METHODS.leave]: AuthAccessWriteScope,
+  [J5_IDENTITY_WS_METHODS.grant]: AuthAccessWriteScope,
+  [J5_IDENTITY_WS_METHODS.bind]: AuthAccessWriteScope,
+  [J5_IDENTITY_WS_METHODS.decline]: AuthAccessWriteScope,
+  [J5_IDENTITY_WS_METHODS.unbind]: AuthAccessWriteScope,
 } as const;

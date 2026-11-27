@@ -334,6 +334,8 @@ export interface PersonAccessShape {
     readonly sessionId: AuthSessionId;
     readonly personId: ParticipantId;
     readonly ceiling: ReadonlyArray<string> | null;
+    /** The J5 Connect account whose sign-in the session came from, carried through a renewal. */
+    readonly signInAccountId?: string | null;
   }) => Effect.Effect<void, PersonAccessStorageError | PersonNotFoundError>;
   /** Cuts a session loose from its person; reports whose it was. Its renewal mark goes with it. */
   readonly unbindSession: (
@@ -1079,12 +1081,18 @@ const make: Layer.Layer<PersonAccess, never, SqlClient.SqlClient | ReadChanges> 
           const boundAt = DateTime.formatIso(yield* DateTime.now);
           const ceiling = input.ceiling === null ? null : encodeCeiling(input.ceiling);
           yield* sql`
-            INSERT INTO j5_a2a_person_session (session_id, person_id, bound_at, ceiling_scopes)
-            VALUES (${input.sessionId}, ${input.personId}, ${boundAt}, ${ceiling})
+            INSERT INTO j5_a2a_person_session (
+              session_id, person_id, bound_at, ceiling_scopes, sign_in_account_id
+            )
+            VALUES (
+              ${input.sessionId}, ${input.personId}, ${boundAt}, ${ceiling},
+              ${input.signInAccountId ?? null}
+            )
             ON CONFLICT (session_id) DO UPDATE SET
               person_id = excluded.person_id,
               bound_at = excluded.bound_at,
               ceiling_scopes = excluded.ceiling_scopes,
+              sign_in_account_id = excluded.sign_in_account_id,
               renew_pending_since = NULL
           `;
           yield* announce(input.personId);

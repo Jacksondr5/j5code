@@ -23,6 +23,7 @@ import {
 } from "../cliAuthFormat.ts";
 import * as ServerConfig from "../config.ts";
 import { authScopesFlag } from "./authScopes.ts";
+import { authConnectCommand as j5AuthConnectCommand } from "../j5/identity/cliConnect.ts";
 import { cliEnvironmentAuth as j5CliEnvironmentAuth } from "../j5/sharing/AccessGate.ts";
 import {
   pairingLinkFromCli as j5PairingLinkFromCli,
@@ -393,5 +394,11 @@ const sessionCommand = Command.make("session").pipe(
 
 export const authCommand = Command.make("auth").pipe(
   Command.withDescription("Manage the local auth control plane for headless deployments."),
-  Command.withSubcommands([pairingCommand, sessionCommand, connectDeviceCommand]),
+  // J5: `auth connect` joins or leaves a J5 Connect (FORK.md case 79).
+  Command.withSubcommands([
+    pairingCommand,
+    sessionCommand,
+    connectDeviceCommand,
+    j5AuthConnectCommand,
+  ]),
 );

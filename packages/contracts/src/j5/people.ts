@@ -11,6 +11,7 @@ import { AuthSessionId, ProjectId, ThreadId, TrimmedNonEmptyString } from "../ba
 import { ProjectIconOverride } from "../project.ts";
 import { HeldPersonLevel } from "./access.ts";
 import { J5ActionError } from "./actionError.ts";
+import { J5IdentityRpcGroup } from "./identity.ts";
 import { PersonLevel, PersonScope } from "./levels.ts";
 import { SharingLinkLifetime, SharingPersonName } from "./sharing.ts";
 
@@ -386,4 +387,5 @@ export const J5PeopleRpcGroup = RpcGroup.make(
     success: Done,
     error: PeopleError,
   }),
-);
+  // Sign-in through J5 Connect rides here, so it adds no seam to upstream's RPC group.
+).merge(J5IdentityRpcGroup);

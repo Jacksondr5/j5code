@@ -131,6 +131,12 @@ export interface AccessShape {
    * goes (AC49). Their record stays for the messages they wrote.
    */
   readonly removePerson: (personId: ParticipantId) => Effect.Effect<void, ChangeError>;
+  /**
+   * Ends the MCP clients a person approved, and voids approvals still waiting if they are an
+   * Owner, as removing them would, while leaving them on the server. For a J5 Connect account
+   * that lapsed: a disabled account counts as a removed Owner for its MCP clients.
+   */
+  readonly endMcpApprovals: (personId: ParticipantId) => Effect.Effect<void, ChangeError>;
   /** A person's new name, told to whatever follows it, such as a shared conversation's note. */
   readonly rename: (input: {
     readonly personId: ParticipantId;
@@ -493,6 +499,22 @@ const make = Effect.gen(function* () {
         }),
       );
       yield* tell({ personId, kind: "removed" });
+    }),
+
+    endMcpApprovals: Effect.fn("j5.sharing.access.endMcpApprovals")(function* (personId) {
+      if (snapshotOf(yield* people.listLevels(personId)).owner) yield* voidWaitingMcpApprovals;
+      // Ended first and forgotten after, so a client whose revoke fails is found again next time.
+      const approved = yield* sql<{ readonly session_id: AuthSessionId }>`
+        SELECT session_id FROM j5_a2a_mcp_client_approver WHERE person_id = ${personId}
+      `.pipe(Effect.mapError(mcpStorage("read the MCP clients a person approved")));
+      const sessionIds = approved.map((row) => row.session_id);
+      yield* endAll(sessionIds, true);
+      for (const sessionId of sessionIds) {
+        yield* sql`
+          DELETE FROM j5_a2a_mcp_client_approver
+          WHERE person_id = ${personId} AND session_id = ${sessionId}
+        `.pipe(Effect.mapError(mcpStorage("forget an ended MCP client")));
+      }
     }),
 
     rename: Effect.fn("j5.sharing.access.rename")(function* (input) {

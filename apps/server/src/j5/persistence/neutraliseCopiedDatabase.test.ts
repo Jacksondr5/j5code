@@ -126,6 +126,10 @@ const seed = Effect.fn("test.j5.neutralise.seed")(function* () {
   }
   yield* sql`INSERT INTO j5_playbook_step_delivery (run_id, request_id, step_id, landed_at)
     VALUES ('run-active', 'request-1', 'build', ${at})`;
+  yield* sql`INSERT INTO j5_identity_connect (singleton, issuer, client_id, return_urls_json, joined_at)
+    VALUES (1, 'https://connect.example.test', 'j5-test-server', '[]', ${at})`;
+  yield* sql`INSERT INTO j5_identity_account (account_id, issuer, subject, refresh_token)
+    VALUES ('account:ada', 'https://connect.example.test', 'ada', 'invented-refresh-token')`;
 });
 
 /** Every row a starting server would act on, by the queries its workers run. */
@@ -154,6 +158,7 @@ const actingRows = Effect.fn("test.j5.neutralise.actingRows")(function* () {
     ),
     playbookRuns: yield* count("j5_playbook_run WHERE status = 'active'"),
     playbookStepDeliveries: yield* count("j5_playbook_step_delivery WHERE resolved_at IS NULL"),
+    signInAccounts: (yield* count("j5_identity_account")) + (yield* count("j5_identity_connect")),
   };
 });
 
@@ -168,6 +173,7 @@ const nothingActing = {
   crewProposals: 0,
   playbookRuns: 0,
   playbookStepDeliveries: 0,
+  signInAccounts: 0,
 };
 
 it.layer(NodeServices.layer)("neutraliseCopiedDatabase", (it) => {
@@ -188,6 +194,7 @@ it.layer(NodeServices.layer)("neutraliseCopiedDatabase", (it) => {
         crewProposals: 1,
         playbookRuns: 1,
         playbookStepDeliveries: 1,
+        signInAccounts: 1,
       });
       assert.deepEqual(yield* actingRows(), nothingActing);
       // A peer's line slot goes with it.

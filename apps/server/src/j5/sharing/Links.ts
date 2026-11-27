@@ -258,6 +258,43 @@ const decodeChosenIcon = Schema.decodeUnknownOption(Schema.fromJsonString(Stored
 const chosenIcon = (stored: string | null) =>
   stored === null ? null : Option.getOrNull(decodeChosenIcon(stored));
 
+/**
+ * Upstream's single-use pairing credential for a device joining, holding what the person's
+ * highest level gives, recorded with the person it pairs: from a J5 link, or from a sign-in
+ * through J5 Connect (`identity/Identity.ts`), which the device exchanges just as it would a link.
+ */
+export const mintPairingCredential = Effect.fn("j5.sharing.links.mint")(function* (input: {
+  readonly linkId: string | null;
+  readonly signInAccountId: string | null;
+  readonly personId: ParticipantId;
+  readonly name: string | null;
+}) {
+  const people = yield* PersonAccess;
+  const intents = yield* PairingIntents;
+  const grants = yield* PairingGrantStore.PairingGrantStore;
+  const levels = yield* people.listLevels(input.personId);
+  const issued = yield* grants
+    .issueOneTimeToken({
+      scopes: [...devicePermissions(highestLevel(levels.map((held) => held.level)), null)],
+      subject: J5_LINK_PAIRING_SUBJECT,
+      ...(input.name === null ? {} : { label: input.name }),
+    })
+    .pipe(
+      Effect.mapError(
+        (cause) => new LinkStorageError({ operation: "make a pairing credential", cause }),
+      ),
+    );
+  yield* intents.record({
+    pairingLinkId: issued.id,
+    credential: issued.credential,
+    personId: input.personId,
+    linkId: input.linkId,
+    signInAccountId: input.signInAccountId,
+    ceiling: null,
+  });
+  return issued.credential;
+});
+
 /** Refuses a project or thread the server does not hold; the server is always there. */
 export const requireScope = Effect.fn("j5.sharing.links.requireScope")(function* (
   sql: SqlClient.SqlClient,
@@ -460,32 +497,17 @@ const make = Effect.gen(function* () {
     `.pipe(Effect.mapError(storage("record who joined with a link")));
   });
 
-  /**
-   * Upstream's single-use pairing credential for the device joining, holding what the person's
-   * highest level gives, recorded with the person it pairs.
-   */
-  const mint = Effect.fn("j5.sharing.links.mint")(function* (input: {
+  const mint = (input: {
     readonly linkId: string;
     readonly personId: ParticipantId;
     readonly name: string | null;
-  }) {
-    const levels = yield* people.listLevels(input.personId);
-    const issued = yield* grants
-      .issueOneTimeToken({
-        scopes: [...devicePermissions(highestLevel(levels.map((held) => held.level)), null)],
-        subject: J5_LINK_PAIRING_SUBJECT,
-        ...(input.name === null ? {} : { label: input.name }),
-      })
-      .pipe(Effect.mapError(storage("make a pairing credential")));
-    yield* intents.record({
-      pairingLinkId: issued.id,
-      credential: issued.credential,
-      personId: input.personId,
-      linkId: input.linkId,
-      ceiling: null,
-    });
-    return { kind: "pair" as const, credential: issued.credential };
-  });
+  }) =>
+    mintPairingCredential({ ...input, signInAccountId: null }).pipe(
+      Effect.provideService(PersonAccess, people),
+      Effect.provideService(PairingIntents, intents),
+      Effect.provideService(PairingGrantStore.PairingGrantStore, grants),
+      Effect.map((credential) => ({ kind: "pair" as const, credential })),
+    );
 
   /** Whether someone already reaches a link's scope, at any level, so joining adds nothing. */
   const reaches = (personId: ParticipantId, scope: PersonScope) =>

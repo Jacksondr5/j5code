@@ -20,6 +20,7 @@ import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
 import * as SessionStore from "../../auth/SessionStore.ts";
 import { AuthSessionRepository } from "../../persistence/AuthSessions.ts";
 import { ParticipantId } from "../a2a/contracts.ts";
+import { signInLive } from "../identity/signInLive.ts";
 import { PersonAccess } from "./PersonAccess.ts";
 
 /**
@@ -119,10 +120,11 @@ export const makeSessionRenewal = (services: {
     const consumed = yield* sql<{
       readonly person_id: string;
       readonly ceiling_scopes: string | null;
+      readonly sign_in_account_id: string | null;
     }>`
       DELETE FROM j5_a2a_person_session
       WHERE session_id = ${sessionId} AND renew_pending_since IS NOT NULL
-      RETURNING person_id, ceiling_scopes
+      RETURNING person_id, ceiling_scopes, sign_in_account_id
     `;
     const binding = consumed[0];
     if (binding === undefined) return yield* new NotRenewableError({});
@@ -133,11 +135,18 @@ export const makeSessionRenewal = (services: {
         : Option.getOrElse(decodeCeiling(binding.ceiling_scopes), () => []);
     const levels = yield* people.listLevels(personId);
     const scopes = devicePermissions(highestLevel(levels.map((held) => held.level)), ceiling);
-    return { old, remaining, personId, ceiling, scopes };
+    // A session from sign-in stays one, so a lapse of its account still ends it; one whose
+    // account no longer vouches for the person is not renewed.
+    const signInAccountId = binding.sign_in_account_id;
+    if (signInAccountId !== null && !(yield* signInLive(sql, signInAccountId, personId))) {
+      return yield* new NotRenewableError({});
+    }
+    return { old, remaining, personId, ceiling, scopes, signInAccountId };
   });
 
   const renew = Effect.fn("j5.sharing.sessionRenewal.renew")(function* (sessionId: AuthSessionId) {
-    const { old, remaining, personId, ceiling, scopes } = yield* takeMark(sessionId);
+    const { old, remaining, personId, ceiling, scopes, signInAccountId } =
+      yield* takeMark(sessionId);
     if (old.method === "dpop-access-token") return yield* new NotRenewableError({});
     const issued = yield* store.issue({
       ttl: remaining,
@@ -146,7 +155,7 @@ export const makeSessionRenewal = (services: {
       scopes,
       client: clientOf(old.client),
     });
-    yield* people.bindSession({ sessionId: issued.sessionId, personId, ceiling });
+    yield* people.bindSession({ sessionId: issued.sessionId, personId, ceiling, signInAccountId });
     return issued;
   });
 
@@ -163,7 +172,8 @@ export const makeSessionRenewal = (services: {
     if (Option.getOrUndefined(key) !== proofKeyThumbprint) {
       return yield* new NotRenewableError({});
     }
-    const { old, remaining, personId, ceiling, scopes } = yield* takeMark(sessionId);
+    const { old, remaining, personId, ceiling, scopes, signInAccountId } =
+      yield* takeMark(sessionId);
     if (old.method !== "dpop-access-token") return yield* new NotRenewableError({});
     const issued = yield* store.issue({
       ttl: Duration.min(KEY_BOUND_TOKEN_TTL, remaining),
@@ -174,7 +184,7 @@ export const makeSessionRenewal = (services: {
       proofKeyThumbprint,
       renewalWindow: remaining,
     });
-    yield* people.bindSession({ sessionId: issued.sessionId, personId, ceiling });
+    yield* people.bindSession({ sessionId: issued.sessionId, personId, ceiling, signInAccountId });
     return issued;
   });
 
