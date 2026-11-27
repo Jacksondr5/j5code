@@ -94,6 +94,8 @@ export const JoinedConnect = Schema.Struct({
   joinedAt: Schema.DateTimeUtc,
 });
 export type JoinedConnect = typeof JoinedConnect.Type;
+/** How the `j5 auth connect join` route sends `JoinedConnect`, and the CLI reads it. */
+export const JoinedConnectJson = Schema.toCodecJson(JoinedConnect);
 
 export const BoundAccount = Schema.Struct({
   accountId: Schema.String,

@@ -8,6 +8,7 @@ import {
   J5_IDENTITY_SIGN_IN_PATH,
   J5_SIGN_IN_OUTCOME_PARAM,
   JoinConnectRequest,
+  JoinedConnectJson,
   ReturnUrlsRequest,
   type SignInOutcome,
 } from "@t3tools/contracts/j5";
@@ -34,6 +35,7 @@ import { Identity } from "./Identity.ts";
 const NO_STORE = { "cache-control": "no-store", "referrer-policy": "no-referrer" } as const;
 const decodeJoin = Schema.decodeUnknownEffect(JoinConnectRequest);
 const decodeReturnUrls = Schema.decodeUnknownEffect(ReturnUrlsRequest);
+const encodeJoined = Schema.encodeSync(JoinedConnectJson);
 
 /** Back to the pairing page, which exchanges a credential as it does a link's. */
 const toPairing = (outcome: SignInOutcome | { readonly credential: string }) =>
@@ -140,7 +142,7 @@ export const identityHttpRouteLayer = Layer.unwrap(
             addresses: decoded.success.addresses ?? [],
           })
           .pipe(
-            Effect.map((joined) => HttpServerResponse.jsonUnsafe(joined)),
+            Effect.map((joined) => HttpServerResponse.jsonUnsafe(encodeJoined(joined))),
             Effect.catchTags({
               OidcError: cliRefusal,
               ClientSecretRefusedError: cliRefusal,

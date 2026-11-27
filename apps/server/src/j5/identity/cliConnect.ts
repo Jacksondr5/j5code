@@ -7,7 +7,7 @@ import {
   J5_IDENTITY_CLI_LEAVE_PATH,
   J5_IDENTITY_CLI_RETURN_URLS_PATH,
   type JoinConnectRequest,
-  JoinedConnect,
+  JoinedConnectJson,
   ReturnUrls,
 } from "@t3tools/contracts/j5";
 import * as Console from "effect/Console";
@@ -52,7 +52,7 @@ export class ConnectCommandError extends Schema.TaggedError<ConnectCommandError>
 
 const CLI_SESSION_TTL = Duration.minutes(2);
 const SERVER_TIMEOUT = Duration.seconds(60);
-const decodeJoined = Schema.decodeUnknownEffect(JoinedConnect);
+const decodeJoined = Schema.decodeUnknownEffect(JoinedConnectJson);
 const decodeReturnUrls = Schema.decodeUnknownEffect(ReturnUrls);
 
 /** The client secret, from a file or, for `-`, stdin; never from the command line. */
