@@ -423,7 +423,7 @@ export const exchangeCode = Effect.fn("j5.identity.oidc.exchangeCode")(function*
     nowMillis: input.nowMillis,
   });
   // Every bound account is confirmed by refresh, so a sign-in without one is refused.
-  if (tokens.refresh_token === undefined) {
+  if (tokens.refresh_token === undefined || tokens.refresh_token === "") {
     return yield* new OidcError({
       stage: "token",
       status:

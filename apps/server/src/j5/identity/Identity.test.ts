@@ -236,7 +236,9 @@ it.effect("joining checks the client's secret and every return address before it
     for (const plainHttpEndpoint of ["outside", "loopback"] as const) {
       connect.plainHttpEndpoint = plainHttpEndpoint;
       const refused = yield* Effect.flip(join(FakeConnect.CLIENT_SECRET));
-      assert.strictEqual(refused._tag, "OidcError", plainHttpEndpoint);
+      if (refused._tag !== "OidcError") return assert.fail(`${plainHttpEndpoint}: ${refused._tag}`);
+      assert.strictEqual(refused.stage, "discovery", plainHttpEndpoint);
+      assert.strictEqual(refused.status, "endpoint is not https", plainHttpEndpoint);
     }
     connect.plainHttpEndpoint = null;
     // A J5 Connect that takes the made-up code proves nothing about the secret.
