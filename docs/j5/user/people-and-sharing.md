@@ -1,7 +1,8 @@
 # People and sharing
 
 Several people can use one server. Sharing is done from the web and desktop apps; the mobile app
-does not share, leave or rename. Each person has a name, a level at the server, a project or a
+does not share, leave or rename. People come in with a link, or by
+[signing in](#signing-in-through-j5-connect). Each person has a name, a level at the server, a project or a
 thread, and the devices paired as them.
 
 - **Viewer** reads what they were given and changes nothing.
@@ -65,6 +66,47 @@ before stays; remove it from their row if you no longer need it.
 On a server you do not own, People shows only you. Rename yourself there, or with **Change your
 name** in the command palette, and leave a project or the server you hold. Leave a thread from its
 menu.
+
+## Signing in through J5 Connect
+
+A server can trust one J5 Connect, which signs people in through your company's identity provider,
+or through GitHub or Google. People then sign in instead of being sent a link. Links keep working,
+for people outside your company and for anyone who can't sign in.
+
+Whoever runs that J5 Connect can sign in as anyone on your server, so trust only one you or your
+company runs. To join one, an Owner opens **Settings → People → Sign-in**, or runs
+`j5 auth connect join` on the server's machine. [J5 Connect](j5-connect.md) says how to run one and
+join it.
+
+To sign in:
+
+- **In a browser**, open the server and choose **Sign in with** your J5 Connect.
+- **In the desktop app**, open **Add environment**, type the server's address, and choose **Sign in
+  instead**. Your browser opens to sign in, and the server is added when you come back. If you have
+  to wait for an Owner, sign in again from the same page once they let you in, and it brings you
+  back to the app.
+
+Signing in never adds anyone to a server. Someone the server doesn't know yet sees **Waiting for an
+Owner**, and their request shows in each Owner's Inbox and under **Settings → People**. There, an
+Owner lets them in at a project or the whole server and a level, says they are someone already on
+the server, or declines. They sign in again to start. A request that is declined, or left for a
+week, says **Not let in** for another week.
+
+A name or email shown with a request comes from J5 Connect and isn't proof of who someone is.
+Check with the person before you let them in.
+
+### When someone leaves
+
+The server checks each signed-in account with J5 Connect every hour. Someone whose company account
+is disabled loses access within a day while J5 Connect is reachable, and within 48 hours at
+worst. That includes a phone or browser they paired from a device they signed in on.
+
+Removing someone under **Settings → People** cuts them off at once. GitHub and Google accounts
+outlive a job, so with those, remove the person when they leave.
+
+**Unbind** on an account under **Sign-in** signs out the devices that signed in with it, and keeps
+the person. **Leave** signs out every device that signed in, and drops the requests. People stay
+on the server with what they reach.
 
 ## When a device is asked your name
 

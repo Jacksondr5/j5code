@@ -63,7 +63,7 @@ Each level maps onto upstream's permissions in one place, so when upstream resha
 
 A **person** has a name, a level at one or more scopes, and devices. Every device paired with the server belongs to exactly one person. A person's id is stable and does not depend on how they signed in.
 
-For now, J5 has no authoritative identity. A person is whoever their link was for: the server takes their word, and nothing proves that the person holding a link is the one it was made for. The person id stays apart from sign-in so that a sign-in can be attached later without changing who anyone is.
+A person may also have an **account**: who a J5 Connect says they are, known by its issuer and their id there, never by a name or an email. A server trusts at most one J5 Connect, which signs people in through their company's identity provider, GitHub or Google; whoever runs it can sign in as anyone on the server, so trusting one is an Owner's choice. An Owner binds each account to one person, and each person has at most one account. Signing in never makes a person: someone the server does not know is asked to wait, and an Owner lets them in, says who they already are, or declines. Binding or unbinding an account changes who signs in as a person, never who the person is. A person who came in by a link and has no account is whoever the link was for: the server takes their word.
 
 The **first owner** is the person the server's own machine belongs to. The desktop app on that machine, and the link a server prints when it starts, pair a device as the first owner.
 
@@ -101,6 +101,12 @@ Settings configures a server, so it belongs to that server's Owners. Settings an
 
 A **link** brings a person in. It carries a scope, a level, a lifetime, and whether one person or many may use it; a link for one person names who it is for, so every link in force says whose it is. A link for many is for Viewers only: a link that is forwarded lets in people nobody invited, so writing takes an Owner raising that person. An Owner can copy any link again until it expires or is used up, so a long-lived link for many is sent to more people without making another. Whoever opens it confirms or types their name and is in. A link for one person is the way to add a person's further device. An Owner whose device holds upstream's Manage access shares from one Share dialog. A thread is shared from the thread itself; a project or the whole server is shared from the People page, which is the one place for both, so no project page carries a sharing section of its own. There, an Owner also widens someone already on the server to a project or the whole server from that person's own row, at the highest level they hold. Nobody else shares, and no agent does.
 
+### Sign-in and offboarding
+
+Signing in is a way to pair a device, beside a link: a sign-in by a bound account pairs the device as its person, as a link for them would. Links and pairing codes stay, for people outside the J5 Connect, for servers that trust none, for the first owner, and to recover.
+
+A sign-in lasts while the J5 Connect keeps confirming its account. Each server asks it every hour; an account it has not confirmed for a day loses the devices that signed in with it and those paired from them, and when it is an Owner's, the MCP clients they approved. A refusal on its own is not acted on, because an identity provider's outage answers the same, and a server that hears nothing at all waits a day of tries before it acts, so a server waking from sleep acts on no one. Someone whose company account is disabled loses access within a day while the J5 Connect is reachable, and within two days at worst; they keep what they reach, and sign in again once their account is active. Removing a person is immediate, and is how an Owner offboards someone whose GitHub or Google account outlives the job.
+
 ### Names
 
 A person's name is how people and agents know them, and how a person is found when a device is paired for them. A name belongs to one person on a server. A person changes their own name, and an Owner changes anyone's. A server's first owner gives their name on their first device, before the server is used.
@@ -112,7 +118,7 @@ A person leaves a scope they hold from their own client. An Owner removes a pers
 ### What it is not
 
 - **Not containment.** Anything that can write reaches the whole machine through its agents and terminals.
-- **Not identity.** Nothing proves a person is who their link names.
+- **Not identity by link.** Nothing proves a person is who their link names; only an account a J5 Connect vouches for says who someone is, and only after an Owner binds it.
 - **Not isolation.** Every person's agents run with the server's one set of provider and git credentials.
 
 ### Later
@@ -120,7 +126,6 @@ A person leaves a scope they hold from their own client. An Owner removes a pers
 Set aside on purpose, each tracked where it is linked. An item leaves this list when the definition takes it in.
 
 - Settings worked through page by page for Collaborators and Viewers, and with it archiving and deleting for those who are not Owners ([#630](https://github.com/Jacksondr5/j5code/issues/630)).
-- An authoritative identity: a sign-in, such as a company's, that proves who a person is ([#632](https://github.com/Jacksondr5/j5code/issues/632)).
 - Sharing, leaving and renaming from the mobile app ([#609](https://github.com/Jacksondr5/j5code/issues/609)).
 - A Viewer watching a thread's preview tabs ([#540](https://github.com/Jacksondr5/j5code/issues/540)).
 - Leaving one thread inside a project or server one holds as a whole, and the rest of the set-aside list ([#542](https://github.com/Jacksondr5/j5code/issues/542)).
@@ -202,6 +207,19 @@ Set aside on purpose, each tracked where it is linked. An item leaves this list 
 50. A device paired with the wrong link is repaired by ending it, from the People page or upstream's Connections settings, and pairing it again with the right one.
 51. The first owner cannot be removed or lowered: the People page and the Share dialog offer no level control or removal on them, and a request to do either is refused.
 
+### Sign-in
+
+52. An Owner can make the server trust one J5 Connect, from Settings or on the server's own machine. Trusting it first checks its client and that it sends a browser back to every address the server is reached at, lists the addresses to register, and changes nothing if one is missing; trusting another leaves the first.
+53. Web, desktop and the mobile app offer sign-in beside pairing, at each address the server registered; links and pairing codes keep working.
+54. A sign-in by an account bound to a person pairs the device as that person, at their level, as a link for them would.
+55. A sign-in by an account bound to no one makes no person: the device is told it waits for an Owner, and the request is shown to the server's Owners in their Inbox and on the People page.
+56. An Owner lets a waiting account in as a new person at a scope and level, binds it to someone already on the server, or declines it; each decision acts only on a request still waiting. A declined request, or one left a week, is told "not let in" for a week before it can ask again.
+57. Each person has at most one account and each account at most one person, and a second binding is refused either way. An Owner can unbind an account, which ends the devices that signed in with it and keeps the person.
+58. A name or email a J5 Connect gives is shown as what it says and never matched on; an email it has not verified is not shown.
+59. An account its J5 Connect has not confirmed for a day loses every device that signed in with it and every device paired from one of those, open connections included, and, when it is an Owner's, the MCP clients they approved. Its person keeps what they reach and can sign in again once the J5 Connect confirms the account.
+60. A server that gets no answer from its J5 Connect acts on an unconfirmed account only after a day of hourly tries with none, counted across restarts; a server waking from sleep acts on no account before its J5 Connect has answered.
+61. Leaving the J5 Connect ends every device that signed in through it, or was paired from one that did, and drops every request; people stay with what they reach.
+
 ## Scenarios
 
 - **A backup Owner.** The user runs L2 Support Rotation's server and makes a link at server scope, level Owner, for the colleague who covers when they are away. The colleague's laptop pairs as them; they see every project and thread, configure the server, and make links for the next shift. (AC8, AC15, AC16, AC31, AC32, AC34)
@@ -213,6 +231,8 @@ Set aside on purpose, each tracked where it is linked. An item leaves this list 
 - **A device nobody planned.** A device paired through a route J5 does not know is asked who it belongs to on L2 Support before anything else. The person picks their own name from the list and carries on. (AC5)
 - **A typo.** A Viewer's name was typed as "Prya". She changes it herself, and the agent of a thread she writes to is told. Her earlier messages keep the old name. (AC46, AC47)
 - **A step down.** The backup Owner moves teams and the user makes them a Collaborator. Their laptop, open on the Fleet page, reconnects at once and no longer offers settings. (AC16, AC17)
+- **A new colleague signs in.** L2 Support's server trusts the company's J5 Connect. A new support engineer opens it and signs in with their company account; they are told to wait. The user sees the request in their Inbox, lets them in as a Collaborator on L2 Support Rotation, and the engineer signs in again and is in. (AC53, AC55, AC56)
+- **Someone leaves the company.** The backup Owner's company account is disabled. Within a day their laptop, and the phone they paired from it, are signed out, and the MCP client they approved stops working; the user removes them from the server the same afternoon. (AC59, AC49)
 - **Leaving and removal.** A Collaborator finishes with Website Redesign and leaves it. Later the user removes a contractor altogether; the contractor's phone, open on a thread, loses it at once, and their messages stay under their name. (AC48, AC49)
 
 ## History
@@ -234,3 +254,4 @@ Set aside on purpose, each tracked where it is linked. An item leaves this list 
 - 2026-11-22 — at the advance onto T3 Code v0.1.11: a device whose session is bound to a key it holds, as upstream's renewing sessions now are, is paired again by hand after a change of level for now, and its own renewal is Later; General, with Language, is shown to everyone and Voice to Collaborators too, its key and models staying an Owner's; the setup wizard is upstream's Welcome page. The levels paragraph, the Settings paragraph, AC17, AC28 and AC30 reworded (Jackson, 2026-11-22; [divergence D33](../upstream.md)). AC5: such a device that paired from a link made for no one is paired again after it answers whose it is (Captain's call on a review finding, 2026-11-22).
 - 2026-11-23 — for now a thread's scope follows where Peer Agents are placed today, so deleting a thread takes the Peer Agents placed beneath it out of the scopes above it, until [#1204](https://github.com/Jacksondr5/j5code/issues/1204) settles the hierarchy (AC9; Jackson, [#1171](https://github.com/Jacksondr5/j5code/issues/1171)).
 - 2026-11-23 — a device whose session is bound to a key it holds takes its new session by itself after a change of level or after it answers whose it is, as every other device does, and leaves Later (AC5, AC17; [#1190](https://github.com/Jacksondr5/j5code/issues/1190)). A device never holds more than its level gives, and when the server starts, one that only lacks a newly added permission keeps its session and gains it with its next new session, so a permission upstream adds reconnects no one (AC16; Jackson, 2026-11-23). The levels paragraph reworded.
+- 2026-11-27 — identity: a server may trust one J5 Connect, an Owner binds each account to one person, signing in never makes a person, and a sign-in lasts while the J5 Connect keeps confirming it, a day at most while it is reachable and two at worst, with devices paired from a signed-in one ending with it. The People and devices paragraph, a Sign-in and offboarding section and What it is not reworded; AC52–AC61 and two scenarios added; the authoritative identity leaves Later (Jackson, 2026-11-26 and 2026-11-27, J5 Connect design; [#632](https://github.com/Jacksondr5/j5code/issues/632)).
