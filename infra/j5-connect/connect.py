@@ -90,6 +90,10 @@ def render_config(env):
         if not fixture and (parsed.scheme != "https" or not parsed.hostname):
             raise ValueError("J5_CONNECT_UPSTREAM_ISSUER must use HTTPS")
         connector["id"] = "oidc-" + hashlib.sha256(upstream.encode()).hexdigest()
+        user_info = env.get("J5_CONNECT_OIDC_GET_USER_INFO", "true")
+        if user_info not in ("true", "false"):
+            raise ValueError("J5_CONNECT_OIDC_GET_USER_INFO must be true or false")
+        connector["config"]["getUserInfo"] = user_info == "true"
         if env.get("J5_CONNECT_OIDC_SCOPES"):
             connector["config"]["scopes"] = env["J5_CONNECT_OIDC_SCOPES"].split()
     config["connectors"] = [connector]

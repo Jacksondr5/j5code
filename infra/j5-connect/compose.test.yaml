@@ -19,6 +19,16 @@ services:
     ports: !override
       - "127.0.0.1:${J5_CONNECT_TEST_HTTPS_PORT:-8443}:443"
 
+    healthcheck:
+      test:
+        - CMD
+        - python3
+        - -c
+        - >-
+          import ssl, urllib.request;
+          context = ssl.create_default_context(cafile="/data/caddy/pki/authorities/local/root.crt");
+          urllib.request.urlopen("https://localhost/.well-known/openid-configuration", context=context, timeout=1).close()
+
   postgres:
     restart: "no"
     environment:

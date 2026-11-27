@@ -47,6 +47,15 @@ class ConfigTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "must use HTTPS"):
             render_config(env)
 
+    def test_oidc_user_info_defaults_to_true_and_can_be_disabled(self):
+        for value, expected in ((None, True), ("true", True), ("false", False)):
+            with self.subTest(value=value):
+                env = ENV if value is None else dict(ENV, J5_CONNECT_OIDC_GET_USER_INFO=value)
+                config = render_config(env)
+                self.assertIs(config["connectors"][0]["config"]["getUserInfo"], expected)
+        with self.assertRaisesRegex(ValueError, "must be true or false"):
+            render_config(dict(ENV, J5_CONNECT_OIDC_GET_USER_INFO="yes"))
+
     def test_rejects_extra_grants(self):
         config = render_config(ENV)
         config["oauth2"]["grantTypes"].append("urn:ietf:params:oauth:grant-type:token-exchange")
