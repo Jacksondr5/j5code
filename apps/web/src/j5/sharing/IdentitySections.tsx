@@ -292,14 +292,15 @@ function LetInForm({
   return (
     <div className="flex flex-col gap-2 rounded-lg border border-border/70 p-3">
       <div className="flex flex-wrap items-center gap-2">
-        <Input
-          size="sm"
-          className="w-48"
-          aria-label="Name"
-          placeholder="Their name here"
-          value={name}
-          onChange={(event) => setName(event.currentTarget.value)}
-        />
+        <div className="flex w-48">
+          <Input
+            size="sm"
+            aria-label="Name"
+            placeholder="Their name here"
+            value={name}
+            onChange={(event) => setName(event.currentTarget.value)}
+          />
+        </div>
         <Select
           value={where}
           onValueChange={(next) => {
@@ -440,32 +441,35 @@ function JoinForm({ environmentId }: { readonly environmentId: EnvironmentId }) 
       <div className="flex flex-col gap-2">
         <p className="text-sm font-medium">2. Join it</p>
         <div className="flex flex-wrap items-center gap-2">
-          <Input
-            size="sm"
-            className="w-64"
-            aria-label="J5 Connect address"
-            placeholder="https://connect.example.com"
-            value={issuer}
-            onChange={(event) => setIssuer(event.currentTarget.value)}
-          />
-          <Input
-            size="sm"
-            className="w-40"
-            aria-label="Client id"
-            placeholder="Client id"
-            value={clientId}
-            onChange={(event) => setClientId(event.currentTarget.value)}
-          />
-          <Input
-            size="sm"
-            className="w-48"
-            type="password"
-            autoComplete="new-password"
-            aria-label="Client secret"
-            placeholder="Client secret"
-            value={clientSecret}
-            onChange={(event) => setClientSecret(event.currentTarget.value)}
-          />
+          <div className="flex w-64">
+            <Input
+              size="sm"
+              aria-label="J5 Connect address"
+              placeholder="https://connect.example.com"
+              value={issuer}
+              onChange={(event) => setIssuer(event.currentTarget.value)}
+            />
+          </div>
+          <div className="flex w-40">
+            <Input
+              size="sm"
+              aria-label="Client id"
+              placeholder="Client id"
+              value={clientId}
+              onChange={(event) => setClientId(event.currentTarget.value)}
+            />
+          </div>
+          <div className="flex w-48">
+            <Input
+              size="sm"
+              type="password"
+              autoComplete="new-password"
+              aria-label="Client secret"
+              placeholder="Client secret"
+              value={clientSecret}
+              onChange={(event) => setClientSecret(event.currentTarget.value)}
+            />
+          </div>
           <Button
             size="sm"
             disabled={
