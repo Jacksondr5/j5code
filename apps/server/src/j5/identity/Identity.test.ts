@@ -9,6 +9,7 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -233,6 +234,10 @@ it.effect("joining checks the client's secret and every return address before it
       assert.strictEqual(refused._tag, "OidcError", plainHttpEndpoint);
     }
     connect.plainHttpEndpoint = null;
+    // A J5 Connect that takes the made-up code proves nothing about the secret.
+    connect.takesAnyCode = true;
+    assert.strictEqual((yield* Effect.flip(join(FakeConnect.CLIENT_SECRET)))._tag, "OidcError");
+    connect.takesAnyCode = false;
 
     const done = yield* join(FakeConnect.CLIENT_SECRET);
     assert.deepStrictEqual(done.returnUrls, missing.toRegister);
@@ -296,7 +301,11 @@ it.effect("a granted account pairs its browser as its new person, as a link woul
     const bound = yield* sql<{ readonly sign_in_account_id: string | null }>`
       SELECT sign_in_account_id FROM j5_a2a_person_session WHERE session_id = ${sessionId}
     `;
-    assert.isNotNull(bound[0]?.sign_in_account_id);
+    const adaAccount = (yield* (yield* Identity.Identity).state).accounts.find(
+      (account) => account.personId === adaId,
+    );
+    assert.strictEqual(bound[0]?.sign_in_account_id, adaAccount?.accountId);
+    assert.isDefined(adaAccount);
   }).pipe(Effect.provide(makeLayer())),
 );
 
@@ -480,6 +489,7 @@ it.effect("a disabled account's sign-in lapses after a day, closing its open soc
     assert.isTrue(Exit.isSuccess(yield* Fiber.await(socket)));
 
     // Signing in again works only once the company account is active again.
+    assert.strictEqual((yield* Effect.flip(signIn("ada")))._tag, "OidcError");
     (yield* FakeConnect.FakeConnect).users.get("ada")!.active = true;
     assert.strictEqual((yield* signIn("ada")).kind, "pair");
   }).pipe(Effect.provide(makeLayer())),
@@ -493,6 +503,11 @@ it.effect("a refresh that carries no ID token confirms nothing", () =>
     const { sessionId } = yield* pairedBrowser("ada");
     connect.refreshWithoutIdToken = true;
     yield* passes(24);
+    // The first refresh spent the token without confirming; later ones meet J5 Connect's
+    // refusal of a spent token, which looks like an outage, so the lapse comes from the count
+    // of passes with no answer.
+    assert.isTrue(yield* isLive(sessionId));
+    yield* passes(1);
     assert.isFalse(yield* isLive(sessionId));
   }).pipe(Effect.provide(makeLayer())),
 );
@@ -603,8 +618,11 @@ it.effect("one stalled refresh does not keep another account's sign-in alive", (
     yield* joined;
     yield* grantAda;
     yield* grantAs("bob", "Bob");
+    yield* grantAs("carol", "Carol");
     yield* pairedBrowser("ada");
     const bob = yield* pairedBrowser("bob");
+    // Carol's refresh is the answer that tells this pass J5 Connect is up.
+    const carol = yield* pairedBrowser("carol");
     yield* disable("bob");
     connect.stall.add("ada");
     connect.stalled = yield* Deferred.make<void>();
@@ -614,6 +632,7 @@ it.effect("one stalled refresh does not keep another account's sign-in alive", (
     yield* TestClock.adjust("16 seconds");
     yield* Fiber.join(pass);
     assert.isFalse(yield* isLive(bob.sessionId));
+    assert.isTrue(yield* isLive(carol.sessionId));
   }).pipe(Effect.provide(makeLayer())),
 );
 
@@ -632,10 +651,29 @@ it.effect("waking with no network lapses no one; a day of passes with no answer 
     yield* identity.confirmAll;
     assert.isTrue(yield* isLive(sessionId));
     connect.down = false;
-    connect.discoveryBroken = true;
+    // A failed discovery is no answer, whatever its status.
+    for (const status of [500, 404]) {
+      connect.discoveryStatus = status;
+      yield* identity.confirmAll;
+      assert.isTrue(yield* isLive(sessionId), String(status));
+    }
+    connect.discoveryStatus = null;
+    // Discovery answers, but every refresh meets an outage or a redirect: still no answer.
+    connect.outage = true;
     yield* identity.confirmAll;
     assert.isTrue(yield* isLive(sessionId));
-    connect.discoveryBroken = false;
+    connect.outage = false;
+    connect.refreshStatus = 302;
+    yield* identity.confirmAll;
+    assert.isTrue(yield* isLive(sessionId));
+    connect.refreshStatus = null;
+    // Nor is a pass without the client's secret to refresh with.
+    const secrets = yield* ServerSecretStore.ServerSecretStore;
+    const secret = yield* secrets.get("j5-connect-client-secret");
+    yield* secrets.remove("j5-connect-client-secret");
+    yield* identity.confirmAll;
+    assert.isTrue(yield* isLive(sessionId));
+    if (Option.isSome(secret)) yield* secrets.set("j5-connect-client-secret", secret.value);
     yield* passes(1);
     assert.isTrue(yield* isLive(sessionId));
 
@@ -693,6 +731,30 @@ it.effect("a sign-in without offline access is refused, and an unverified email 
     const [request] = (yield* identity.state).requests;
     assert.strictEqual(request!.name, "Hopper");
     assert.isNull(request!.email);
+  }).pipe(Effect.provide(makeLayer())),
+);
+
+it.effect("rejoining with another client forgets the accounts; the same client keeps them", () =>
+  Effect.gen(function* () {
+    const identity = yield* Identity.Identity;
+    yield* joined;
+    yield* grantAda;
+    const { sessionId } = yield* pairedBrowser("ada");
+    const rejoin = (clientId: string) =>
+      identity.join({
+        issuer: FakeConnect.ISSUER,
+        clientId,
+        clientSecret: FakeConnect.CLIENT_SECRET,
+        addresses: [SECOND_ADDRESS],
+      });
+
+    yield* rejoin(FakeConnect.CLIENT_ID);
+    assert.strictEqual((yield* identity.state).accounts.length, 1);
+    assert.isTrue(yield* isLive(sessionId));
+
+    yield* rejoin(FakeConnect.OTHER_CLIENT_ID);
+    assert.deepStrictEqual((yield* identity.state).accounts, []);
+    assert.isFalse(yield* isLive(sessionId));
   }).pipe(Effect.provide(makeLayer())),
 );
 

@@ -32,7 +32,7 @@ import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
 import * as ServerConfig from "../../config.ts";
 import * as DirectEndpoints from "../../environment/DirectEndpoints.ts";
 import { ParticipantId } from "../a2a/contracts.ts";
-import { ReadChanges, layer as readChangesLayer } from "../a2a/ReadChanges.ts";
+import * as ReadChanges from "../a2a/ReadChanges.ts";
 import { Access } from "../sharing/Access.ts";
 import { mintPairingCredential, requireScope } from "../sharing/Links.ts";
 import { PairingIntents } from "../sharing/PairingIntents.ts";
@@ -378,7 +378,7 @@ const make = Effect.gen(function* () {
   const config = yield* ServerConfig.ServerConfig;
   const directEndpoints = yield* Effect.serviceOption(DirectEndpoints.DirectEndpoints);
   // A request waits in its Owners' Inbox as well as on the People page.
-  const peopleChanged = (yield* ReadChanges).notify("sharing", "inbox");
+  const peopleChanged = (yield* ReadChanges.ReadChanges).notify("sharing", "inbox");
   const storage = (operation: string) => (cause: unknown) =>
     new IdentityStorageError({ operation, cause });
   const nowIso = DateTime.now.pipe(Effect.map(DateTime.formatIso));
@@ -610,7 +610,10 @@ const make = Effect.gen(function* () {
     `.pipe(Effect.mapError(storage("forget a lapsed account's refresh token")));
   });
 
-  /** Refreshes one account; its own failure is logged and leaves the others alone. */
+  /**
+   * Refreshes one account; its own failure is logged and leaves the others alone. Whether J5
+   * Connect answered it for certain, as a success or a refusal it gave, not an outage's.
+   */
   const confirmOne = Effect.fn("j5.identity.confirmOne")(function* (
     connect: ConnectRow,
     discovery: Oidc.Discovery,
@@ -636,7 +639,7 @@ const make = Effect.gen(function* () {
         accountId: account.account_id,
         cause: refreshed.failure,
       });
-      return;
+      return Oidc.answered(refreshed.failure);
     }
     // Only over the token it refreshed: a sign-in meanwhile keeps the newer one it brought.
     yield* sql`
@@ -644,19 +647,26 @@ const make = Effect.gen(function* () {
       SET refresh_token = ${refreshed.success}, last_confirmed_at = ${yield* nowIso}
       WHERE account_id = ${account.account_id} AND refresh_token = ${account.refresh_token}
     `.pipe(Effect.mapError(storage("record a confirmation")));
+    return true;
   });
 
-  /** Refreshes every bound account; whether J5 Connect gave any answer at all. */
-  const refreshAll = Effect.fn("j5.identity.refreshAll")(function* (connect: ConnectRow) {
+  /**
+   * Refreshes every bound account with the J5 Connect and secret read together at the start of
+   * the pass. Whether it answered: discovery did, with the secret in hand, and so did at least one
+   * refresh, when any is due. A failed discovery or a missing secret is never an answer.
+   */
+  const refreshAll = Effect.fn("j5.identity.refreshAll")(function* (
+    connect: ConnectRow,
+    secret: Option.Option<string>,
+  ) {
     const discovery = yield* withHttp(Oidc.discover(connect.issuer)).pipe(Effect.result);
     if (discovery._tag === "Failure") {
       yield* Effect.logWarning("J5 Connect could not be reached to confirm accounts", {
         cause: discovery.failure,
       });
-      return Oidc.answered(discovery.failure);
+      return false;
     }
-    const secret = yield* clientSecret.pipe(Effect.option);
-    if (Option.isNone(secret)) return true;
+    if (Option.isNone(secret)) return false;
     const confirming = yield* sql<{
       readonly account_id: string;
       readonly subject: string;
@@ -669,18 +679,21 @@ const make = Effect.gen(function* () {
       -- A lapsed account is not refreshed, so its cleanup finishes before anything confirms it.
       WHERE account.refresh_token IS NOT NULL AND account.sign_in_ended_at IS NULL
     `.pipe(Effect.mapError(storage("read the accounts to confirm")));
-    yield* Effect.forEach(
+    if (confirming.length === 0) return true;
+    const answers = yield* Effect.forEach(
       confirming,
       (account) =>
         confirmOne(connect, discovery.success, secret.value, account).pipe(
           Effect.catchTags({
             IdentityStorageError: (cause) =>
-              Effect.logWarning("Could not record a J5 Connect confirmation", { cause }),
+              Effect.logWarning("Could not record a J5 Connect confirmation", { cause }).pipe(
+                Effect.as(true),
+              ),
           }),
         ),
-      { concurrency: REFRESH_CONCURRENCY, discard: true },
+      { concurrency: REFRESH_CONCURRENCY },
     );
-    return true;
+    return answers.some((answered) => answered);
   });
 
   /** Ends the sign-in of every bound account not confirmed for a day, each on its own. */
@@ -729,9 +742,12 @@ const make = Effect.gen(function* () {
         `;
       }),
     );
+    // The J5 Connect and its secret are read together, so a pass never sends one J5 Connect's
+    // secret to another's endpoints.
     const connect = yield* readConnect;
     if (connect === null) return;
-    const answeredNow = yield* refreshAll(connect);
+    const secret = yield* clientSecret.pipe(Effect.option);
+    const answeredNow = yield* refreshAll(connect, secret);
     // Passes with no answer at all, kept across restarts, so a server restarted daily during an
     // outage still lapses; counted in passes, not wall time, so a long sleep is not an outage.
     const [counted] = yield* sql<{ readonly unanswered_passes: number }>`
@@ -789,7 +805,13 @@ const make = Effect.gen(function* () {
       }
       // Changing the J5 Connect is leaving the old one: whoever runs it no longer vouches here.
       const current = yield* readConnect;
-      if (current !== null && current.issuer !== input.issuer) yield* clearAccounts();
+      // So is a new client at the same one: its refresh tokens were the old client's.
+      if (
+        current !== null &&
+        (current.issuer !== input.issuer || current.client_id !== input.clientId)
+      ) {
+        yield* clearAccounts();
+      }
       yield* secrets.set(CLIENT_SECRET_NAME, new TextEncoder().encode(input.clientSecret));
       const joinedAt = yield* nowIso;
       const row: ConnectRow = {
@@ -1031,9 +1053,9 @@ const make = Effect.gen(function* () {
   });
 });
 
-// `readChangesLayer` is the one the rest of the server provides, so it is the same instance
+// `ReadChanges.layer` is the one the rest of the server provides, so it is the same instance
 // (see `a2a/runtimeLayer.ts`).
-export const layer = Layer.effect(Identity, make).pipe(Layer.provide(readChangesLayer));
+export const layer = Layer.effect(Identity, make).pipe(Layer.provide(ReadChanges.layer));
 
 /** The hourly confirmation, started with the server and stopped with it. */
 export const confirmationLayer = Layer.effectDiscard(

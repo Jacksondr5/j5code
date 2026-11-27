@@ -19,6 +19,9 @@ import * as HttpClientResponse from "effect/http/HttpClientResponse";
 
 export const ISSUER = "https://connect.example.test";
 export const CLIENT_ID = "j5-test-server";
+/** A second client registered for the same server, with the same secret and return addresses. */
+export const OTHER_CLIENT_ID = "j5-test-server-renamed";
+const CLIENT_IDS = new Set([CLIENT_ID, OTHER_CLIENT_ID]);
 export const CLIENT_SECRET = "invented-client-secret";
 
 interface User {
@@ -66,8 +69,12 @@ export interface FakeConnectShape {
   withoutOfflineAccess: boolean;
   /** Discovery names its token endpoint over plain HTTP: to an outside name, or to loopback. */
   plainHttpEndpoint: "outside" | "loopback" | null;
-  /** Discovery answers 500, as a J5 Connect that is up but broken does. */
-  discoveryBroken: boolean;
+  /** Discovery answers with this status and no configuration, as a broken J5 Connect does. */
+  discoveryStatus: number | null;
+  /** Every refresh answers with this status and no tokens, as a proxy in front of it might. */
+  refreshStatus: number | null;
+  /** The token endpoint takes any code at all. */
+  takesAnyCode: boolean;
   /** The next code exchange waits at this gate. */
   codeGate: Gate | null;
   /** Overrides on the next ID token's claims, to make one that must not be trusted. */
@@ -111,7 +118,9 @@ const make = Effect.promise(async () => {
     refreshWithoutIdToken: false,
     withoutOfflineAccess: false,
     plainHttpEndpoint: null,
-    discoveryBroken: false,
+    discoveryStatus: null,
+    refreshStatus: null,
+    takesAnyCode: false,
     codeGate: null,
     nextClaims: null,
     signIn: (authorizationUrl, subject) => {
@@ -138,6 +147,7 @@ const make = Effect.promise(async () => {
       sub: subject,
       aud: CLIENT_ID,
       exp: 9_999_999_999,
+      iat: 0,
       email: user.email,
       email_verified: user.emailVerified ?? true,
       name: user.name,
@@ -179,13 +189,18 @@ const make = Effect.promise(async () => {
       .toString("utf8")
       .split(":")
       .map(decodeURIComponent);
-    if (basic[0] !== CLIENT_ID || basic[1] !== CLIENT_SECRET) {
+    if (!CLIENT_IDS.has(basic[0] ?? "") || basic[1] !== CLIENT_SECRET) {
       return json({ error: "invalid_client" }, 401);
     }
     if (fake.outage) return json({ error: "invalid_request" }, 500);
     if (body.get("grant_type") === "authorization_code") {
       const code = codes.get(body.get("code") ?? "");
+      if (code === undefined && fake.takesAnyCode) return json({ access_token: random() });
       if (code === undefined) return json({ error: "invalid_grant" }, 400);
+      // A disabled account cannot sign in at all, as at a real identity provider.
+      if (fake.users.get(code.subject)?.active !== true) {
+        return json({ error: "access_denied" }, 403);
+      }
       codes.delete(body.get("code") ?? "");
       const verifier = body.get("code_verifier") ?? "";
       const challenge = NodeCrypto.createHash("sha256").update(verifier).digest("base64url");
@@ -198,6 +213,12 @@ const make = Effect.promise(async () => {
       const presented = body.get("refresh_token") ?? "";
       const subject = refreshTokens.get(presented);
       if (subject !== undefined && fake.stall.has(subject)) return "stall";
+      if (fake.refreshStatus !== null) {
+        return new Response(null, {
+          status: fake.refreshStatus,
+          headers: { location: `${ISSUER}/elsewhere` },
+        });
+      }
       refreshTokens.delete(presented);
       // Dex refuses a disabled account's refresh with the same answer as an outage.
       if (subject === undefined || fake.users.get(subject)?.active !== true) {
@@ -216,7 +237,9 @@ const make = Effect.promise(async () => {
   ): Promise<Response | "stall"> => {
     if (url.origin !== ISSUER) return new Response("not found", { status: 404 });
     if (method === "GET" && url.pathname === "/.well-known/openid-configuration") {
-      if (fake.discoveryBroken) return json({ error: "server_error" }, 500);
+      if (fake.discoveryStatus !== null) {
+        return new Response("unavailable", { status: fake.discoveryStatus });
+      }
       const base =
         fake.plainHttpEndpoint === "outside"
           ? ISSUER.replace("https:", "http:")
@@ -242,7 +265,7 @@ const make = Effect.promise(async () => {
     }
     if (method === "GET" && url.pathname === "/auth/local") {
       const known =
-        url.searchParams.get("client_id") === CLIENT_ID &&
+        CLIENT_IDS.has(url.searchParams.get("client_id") ?? "") &&
         fake.returnUrls.has(url.searchParams.get("redirect_uri") ?? "");
       return known
         ? new Response("<form>sign in</form>", { status: 200 })

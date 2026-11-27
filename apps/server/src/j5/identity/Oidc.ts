@@ -22,6 +22,11 @@ export class OidcError extends Schema.TaggedError<OidcError>()("OidcError", {
    * answer at all: unreachable, or too slow.
    */
   status: Schema.optional(Schema.String),
+  /**
+   * The HTTP status of the response the failure was read from. Absent when no readable response
+   * decided it: unreachable, too slow, or an answer that could not be read.
+   */
+  httpStatus: Schema.optional(Schema.Number),
   cause: Schema.optional(Schema.Defect()),
 }) {
   override get message(): string {
@@ -42,11 +47,13 @@ export class OidcError extends Schema.TaggedError<OidcError>()("OidcError", {
 }
 
 /**
- * Whether the J5 Connect gave an answer, as opposed to none: unreachable, too slow, or a server
- * error, which says nothing about the accounts it vouches for.
+ * Whether a refresh's failure is J5 Connect's own answer about the account: a 2xx or a 4xx. A
+ * redirect, a server error, a timeout or an unreadable answer says nothing about it.
  */
 export const answered = (error: OidcError) =>
-  error.status !== undefined && !/^5\d\d\b/.test(error.status);
+  error.httpStatus !== undefined &&
+  ((error.httpStatus >= 200 && error.httpStatus < 300) ||
+    (error.httpStatus >= 400 && error.httpStatus < 500));
 
 /** Each request, its body included, ends by this, so a stalled J5 Connect holds nothing up. */
 const REQUEST_TIMEOUT = "15 seconds";
@@ -68,6 +75,17 @@ const TokenResponse = Schema.Struct({
 });
 
 const OAuthErrorBody = Schema.Struct({ error: Schema.String });
+/** The token endpoint's error codes (RFC 6749 §5.2, plus the two server-side ones). */
+const OAUTH_ERROR_CODES = new Set([
+  "invalid_request",
+  "invalid_client",
+  "invalid_grant",
+  "unauthorized_client",
+  "unsupported_grant_type",
+  "invalid_scope",
+  "server_error",
+  "temporarily_unavailable",
+]);
 
 const Jwk = Schema.Struct({
   kty: Schema.String,
@@ -89,7 +107,7 @@ const IdTokenClaims = Schema.Struct({
   sub: Schema.String,
   aud: Schema.Union([Schema.String, Schema.Array(Schema.String)]),
   exp: Schema.Number,
-  iat: Schema.optional(Schema.Number),
+  iat: Schema.Number,
   nbf: Schema.optional(Schema.Number),
   azp: Schema.optional(Schema.String),
   nonce: Schema.optional(Schema.String),
@@ -162,7 +180,12 @@ const exchange = Effect.fn("j5.identity.oidc.exchange")(function* (
   return yield* client.execute(request).pipe(
     Effect.flatMap((response) =>
       response.text.pipe(
-        Effect.map((text) => ({ status: response.status, body: parseJson(text), response })),
+        Effect.map((text) => ({
+          status: response.status,
+          text,
+          body: parseJson(text),
+          response,
+        })),
       ),
     ),
     Effect.timeout(REQUEST_TIMEOUT),
@@ -234,7 +257,7 @@ const postToken = Effect.fn("j5.identity.oidc.postToken")(function* (
     readonly params: Record<string, string>;
   },
 ) {
-  const { status, body } = yield* exchange(
+  const { status, text, body } = yield* exchange(
     stage,
     HttpClientRequest.post(input.discovery.token_endpoint).pipe(
       HttpClientRequest.basicAuth(
@@ -246,11 +269,13 @@ const postToken = Effect.fn("j5.identity.oidc.postToken")(function* (
     ),
   );
   if (status !== 200) {
+    // Only the HTTP status and an OAuth error code it recognizes; the raw answer stays in `cause`.
     const said = Option.match(decodeOAuthError(body), {
       onNone: () => String(status),
-      onSome: (error) => `${String(status)} ${error.error}`,
+      onSome: (error) =>
+        OAUTH_ERROR_CODES.has(error.error) ? `${String(status)} ${error.error}` : String(status),
     });
-    return yield* new OidcError({ stage, status: said });
+    return yield* new OidcError({ stage, status: said, httpStatus: status, cause: text });
   }
   return yield* decodeToken(body).pipe(
     Effect.mapError((cause) => new OidcError({ stage, status: "unreadable", cause })),
@@ -283,7 +308,8 @@ const verifyIdToken = Effect.fn("j5.identity.oidc.verifyIdToken")(function* (inp
   readonly nonce: string | null;
   readonly nowMillis: number;
 }) {
-  const refused = (status: string) => new OidcError({ stage: "id_token", status });
+  // The ID token came in a 2xx, so a token that does not check out is J5 Connect's answer.
+  const refused = (status: string) => new OidcError({ stage: "id_token", status, httpStatus: 200 });
   const parts = input.idToken.split(".");
   if (parts.length !== 3) return yield* refused("malformed");
   const [headerPart, payloadPart, signaturePart] = parts as [string, string, string];
@@ -297,8 +323,17 @@ const verifyIdToken = Effect.fn("j5.identity.oidc.verifyIdToken")(function* (inp
     "id_token",
     HttpClientRequest.get(input.discovery.jwks_uri).pipe(HttpClientRequest.acceptJson),
   );
-  if (fetched.status !== 200) return yield* refused(`keys ${String(fetched.status)}`);
-  const keys = yield* decodeJwks(fetched.body).pipe(Effect.mapError(() => refused("keys")));
+  // Keys it could not serve, or served unreadable, say nothing about the account (`answered`).
+  if (fetched.status !== 200) {
+    return yield* new OidcError({
+      stage: "id_token",
+      status: `${String(fetched.status)} keys`,
+      httpStatus: fetched.status,
+    });
+  }
+  const keys = yield* decodeJwks(fetched.body).pipe(
+    Effect.mapError(() => new OidcError({ stage: "id_token", status: "keys" })),
+  );
   const key = keys.keys.find(
     (candidate) =>
       candidate.kty === algorithm.kty &&
@@ -324,7 +359,8 @@ const verifyIdToken = Effect.fn("j5.identity.oidc.verifyIdToken")(function* (inp
         new TextEncoder().encode(`${headerPart}.${payloadPart}`),
       );
     },
-    catch: (cause) => new OidcError({ stage: "id_token", status: "signature", cause }),
+    catch: (cause) =>
+      new OidcError({ stage: "id_token", status: "signature", httpStatus: 200, cause }),
   });
   if (!verified) return yield* refused("signature");
 
@@ -341,7 +377,7 @@ const verifyIdToken = Effect.fn("j5.identity.oidc.verifyIdToken")(function* (inp
   if (claims.nbf !== undefined && claims.nbf - CLOCK_SKEW_SECONDS > nowSeconds) {
     return yield* refused("not yet valid");
   }
-  if (claims.iat !== undefined && claims.iat - CLOCK_SKEW_SECONDS > nowSeconds) {
+  if (claims.iat - CLOCK_SKEW_SECONDS > nowSeconds) {
     return yield* refused("issued in the future");
   }
   if (input.nonce !== null && claims.nonce !== input.nonce) return yield* refused("nonce");
@@ -417,7 +453,7 @@ export const refresh = Effect.fn("j5.identity.oidc.refresh")(function* (input: {
     params: { grant_type: "refresh_token", refresh_token: input.refreshToken },
   });
   if (tokens.id_token === undefined) {
-    return yield* new OidcError({ stage: "refresh", status: "no id_token" });
+    return yield* new OidcError({ stage: "refresh", status: "no id_token", httpStatus: 200 });
   }
   const identity = yield* verifyIdToken({
     discovery: input.discovery,
@@ -427,7 +463,7 @@ export const refresh = Effect.fn("j5.identity.oidc.refresh")(function* (input: {
     nowMillis: input.nowMillis,
   });
   if (identity.subject !== input.subject) {
-    return yield* new OidcError({ stage: "id_token", status: "subject" });
+    return yield* new OidcError({ stage: "id_token", status: "subject", httpStatus: 200 });
   }
   return tokens.refresh_token ?? input.refreshToken;
 });
@@ -452,12 +488,17 @@ export const secretAccepted = Effect.fn("j5.identity.oidc.secretAccepted")(funct
       redirect_uri: input.returnUrl,
     },
   }).pipe(
-    Effect.as(true),
-    Effect.catchTags({
-      OidcError: (error) =>
+    Effect.matchEffect({
+      // A J5 Connect that takes a made-up code can't be judged by it.
+      onSuccess: () =>
+        Effect.fail(new OidcError({ stage: "probe", status: "took a made-up code" })),
+      // Only a client error about the made-up code says the secret was taken: Dex answers an
+      // outage with a 500 `invalid_request` too.
+      onFailure: (error) =>
         error.status !== undefined && /\binvalid_client\b|^401\b/.test(error.status)
           ? Effect.succeed(false)
-          : error.status !== undefined && /\binvalid_grant\b|\binvalid_request\b/.test(error.status)
+          : error.status !== undefined &&
+              /^4\d\d (invalid_grant|invalid_request)$/.test(error.status)
             ? Effect.succeed(true)
             : Effect.fail(new OidcError({ stage: "probe", status: error.status, cause: error })),
     }),
