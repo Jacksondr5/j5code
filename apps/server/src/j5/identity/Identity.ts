@@ -652,7 +652,8 @@ const make = Effect.gen(function* () {
 
   /**
    * Refreshes every bound account with the J5 Connect and secret read together at the start of
-   * the pass. Whether it answered: discovery did, and so did at least one refresh, when any.
+   * the pass. Whether it answered: discovery did, with the secret in hand, and so did at least one
+   * refresh, when any is due. A failed discovery or a missing secret is never an answer.
    */
   const refreshAll = Effect.fn("j5.identity.refreshAll")(function* (
     connect: ConnectRow,
@@ -663,9 +664,9 @@ const make = Effect.gen(function* () {
       yield* Effect.logWarning("J5 Connect could not be reached to confirm accounts", {
         cause: discovery.failure,
       });
-      return Oidc.answered(discovery.failure);
+      return false;
     }
-    if (Option.isNone(secret)) return true;
+    if (Option.isNone(secret)) return false;
     const confirming = yield* sql<{
       readonly account_id: string;
       readonly subject: string;

@@ -9,6 +9,7 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -233,6 +234,10 @@ it.effect("joining checks the client's secret and every return address before it
       assert.strictEqual(refused._tag, "OidcError", plainHttpEndpoint);
     }
     connect.plainHttpEndpoint = null;
+    // A J5 Connect that takes the made-up code proves nothing about the secret.
+    connect.takesAnyCode = true;
+    assert.strictEqual((yield* Effect.flip(join(FakeConnect.CLIENT_SECRET)))._tag, "OidcError");
+    connect.takesAnyCode = false;
 
     const done = yield* join(FakeConnect.CLIENT_SECRET);
     assert.deepStrictEqual(done.returnUrls, missing.toRegister);
@@ -646,15 +651,29 @@ it.effect("waking with no network lapses no one; a day of passes with no answer 
     yield* identity.confirmAll;
     assert.isTrue(yield* isLive(sessionId));
     connect.down = false;
-    connect.discoveryBroken = true;
-    yield* identity.confirmAll;
-    assert.isTrue(yield* isLive(sessionId));
-    connect.discoveryBroken = false;
-    // Discovery answers, but every refresh meets an outage: still no answer.
+    // A failed discovery is no answer, whatever its status.
+    for (const status of [500, 404]) {
+      connect.discoveryStatus = status;
+      yield* identity.confirmAll;
+      assert.isTrue(yield* isLive(sessionId), String(status));
+    }
+    connect.discoveryStatus = null;
+    // Discovery answers, but every refresh meets an outage or a redirect: still no answer.
     connect.outage = true;
     yield* identity.confirmAll;
     assert.isTrue(yield* isLive(sessionId));
     connect.outage = false;
+    connect.refreshStatus = 302;
+    yield* identity.confirmAll;
+    assert.isTrue(yield* isLive(sessionId));
+    connect.refreshStatus = null;
+    // Nor is a pass without the client's secret to refresh with.
+    const secrets = yield* ServerSecretStore.ServerSecretStore;
+    const secret = yield* secrets.get("j5-connect-client-secret");
+    yield* secrets.remove("j5-connect-client-secret");
+    yield* identity.confirmAll;
+    assert.isTrue(yield* isLive(sessionId));
+    if (Option.isSome(secret)) yield* secrets.set("j5-connect-client-secret", secret.value);
     yield* passes(1);
     assert.isTrue(yield* isLive(sessionId));
 

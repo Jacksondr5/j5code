@@ -69,8 +69,12 @@ export interface FakeConnectShape {
   withoutOfflineAccess: boolean;
   /** Discovery names its token endpoint over plain HTTP: to an outside name, or to loopback. */
   plainHttpEndpoint: "outside" | "loopback" | null;
-  /** Discovery answers 500, as a J5 Connect that is up but broken does. */
-  discoveryBroken: boolean;
+  /** Discovery answers with this status and no configuration, as a broken J5 Connect does. */
+  discoveryStatus: number | null;
+  /** Every refresh answers with this status and no tokens, as a proxy in front of it might. */
+  refreshStatus: number | null;
+  /** The token endpoint takes any code at all. */
+  takesAnyCode: boolean;
   /** The next code exchange waits at this gate. */
   codeGate: Gate | null;
   /** Overrides on the next ID token's claims, to make one that must not be trusted. */
@@ -114,7 +118,9 @@ const make = Effect.promise(async () => {
     refreshWithoutIdToken: false,
     withoutOfflineAccess: false,
     plainHttpEndpoint: null,
-    discoveryBroken: false,
+    discoveryStatus: null,
+    refreshStatus: null,
+    takesAnyCode: false,
     codeGate: null,
     nextClaims: null,
     signIn: (authorizationUrl, subject) => {
@@ -189,6 +195,7 @@ const make = Effect.promise(async () => {
     if (fake.outage) return json({ error: "invalid_request" }, 500);
     if (body.get("grant_type") === "authorization_code") {
       const code = codes.get(body.get("code") ?? "");
+      if (code === undefined && fake.takesAnyCode) return json({ access_token: random() });
       if (code === undefined) return json({ error: "invalid_grant" }, 400);
       // A disabled account cannot sign in at all, as at a real identity provider.
       if (fake.users.get(code.subject)?.active !== true) {
@@ -206,6 +213,12 @@ const make = Effect.promise(async () => {
       const presented = body.get("refresh_token") ?? "";
       const subject = refreshTokens.get(presented);
       if (subject !== undefined && fake.stall.has(subject)) return "stall";
+      if (fake.refreshStatus !== null) {
+        return new Response(null, {
+          status: fake.refreshStatus,
+          headers: { location: `${ISSUER}/elsewhere` },
+        });
+      }
       refreshTokens.delete(presented);
       // Dex refuses a disabled account's refresh with the same answer as an outage.
       if (subject === undefined || fake.users.get(subject)?.active !== true) {
@@ -224,7 +237,9 @@ const make = Effect.promise(async () => {
   ): Promise<Response | "stall"> => {
     if (url.origin !== ISSUER) return new Response("not found", { status: 404 });
     if (method === "GET" && url.pathname === "/.well-known/openid-configuration") {
-      if (fake.discoveryBroken) return json({ error: "server_error" }, 500);
+      if (fake.discoveryStatus !== null) {
+        return new Response("unavailable", { status: fake.discoveryStatus });
+      }
       const base =
         fake.plainHttpEndpoint === "outside"
           ? ISSUER.replace("https:", "http:")
