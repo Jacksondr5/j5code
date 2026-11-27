@@ -107,6 +107,8 @@ interface BoxThread {
   readonly linkOrigin: Ref.Ref<{ readonly sessionId: string; readonly label: string } | null>;
   /** The parent the launch names, so the thread there can link back to it. */
   readonly delegatedFrom: Ref.Ref<ThreadLaunch.ThreadLaunchInput["delegatedFrom"] | null>;
+  /** The persona the launch carried, as the box's handler passed it on. */
+  readonly agentPersona: Ref.Ref<ThreadLaunch.ThreadLaunchInput["agentPersona"] | null>;
   /** The model and modes it was launched with. */
   readonly launchedWith: Ref.Ref<LaunchedWith | null>;
   /** The first message the thread there was launched with. */
@@ -167,6 +169,7 @@ const makeBoxThread = Effect.gen(function* () {
       null,
     ),
     delegatedFrom: yield* Ref.make<ThreadLaunch.ThreadLaunchInput["delegatedFrom"] | null>(null),
+    agentPersona: yield* Ref.make<ThreadLaunch.ThreadLaunchInput["agentPersona"] | null>(null),
     launchedWith: yield* Ref.make<LaunchedWith | null>(null),
     message: yield* Ref.make<string | null>(null),
     status: yield* Ref.make<OrchestrationV2Run["status"]>("running"),
@@ -534,6 +537,7 @@ const boxToolkitLayer = (thread: BoxThread) => {
           Ref.set(thread.launched, input.threadId!).pipe(
             Effect.andThen(Ref.set(thread.linkOrigin, input.linkOrigin ?? null)),
             Effect.andThen(Ref.set(thread.delegatedFrom, input.delegatedFrom ?? null)),
+            Effect.andThen(Ref.set(thread.agentPersona, input.agentPersona ?? null)),
             Effect.andThen(Ref.set(thread.message, input.initialMessage?.text ?? null)),
             Effect.andThen(
               Ref.set(thread.launchedWith, {
@@ -1290,6 +1294,31 @@ it.effect("a task named only by environment inherits the parent's model, within 
         modelSelection: parentModelSelection,
         runtimeMode: "auto-accept-edits",
         interactionMode: "default",
+      });
+      expect(yield* Ref.get(thread.agentPersona)).toBeNull();
+
+      // J5: a persona goes with the launch, and the box sets its level from the link, not the wire.
+      const delegated = {
+        pickSource: "agent" as const,
+        callerAccess: { runtimeMode: "full-access" as const },
+        authorModels: ["gpt-5.4"],
+        authorsPartlyUnknown: false,
+      };
+      yield* a.remote.delegate(
+        yield* McpInvocationContext.requireThreadScope(parentScope, "delegate_task"),
+        {
+          task: "Review the suite on the box.",
+          target: { environmentId: box.environmentId },
+          clientRequestId: "persona",
+          agentPersona: {
+            personaId: "reviewer",
+            delegated: { ...delegated, linkLevel: "full-access" },
+          },
+        },
+      );
+      expect(yield* Ref.get(thread.agentPersona)).toEqual({
+        personaId: "reviewer",
+        delegated: { ...delegated, linkLevel: "auto-accept-edits" },
       });
 
       // Asking for more than the link allows is still refused there.

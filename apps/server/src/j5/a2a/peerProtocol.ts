@@ -10,6 +10,7 @@ export const ownPeerCapabilities = {
   landing: true,
   line: true,
   spawn: true,
+  personaDelegate: true,
 } satisfies PeerCapabilities;
 
 /**

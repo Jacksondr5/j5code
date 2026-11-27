@@ -323,6 +323,7 @@ it.effect(
         landing: true,
         line: true,
         spawn: true,
+        personaDelegate: true,
       });
       // The body is exactly what a direct send would carry, intent included.
       assert.equal(handed.deliveries[0]!.intent, "first intent");

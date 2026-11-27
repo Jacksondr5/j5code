@@ -304,6 +304,14 @@ export const pickAgentPersona = Effect.fn("j5.agents.pickAgentPersona")(function
   );
 });
 
+/**
+ * A pick a linked J5 machine delegated here, held to the limits it sent. Nothing escalates here:
+ * the agent that asked is on that machine and can't ask this one's person.
+ */
+export const pickDelegatedPersona = (
+  input: Omit<AgentPersonaPickInput, "escalateFor" | "allowOnce">,
+) => pickWithin(input, undefined).pipe(Effect.map(({ waived: _waived, ...picked }) => picked));
+
 const optionsKey = (options: ReadonlyArray<ProviderOptionSelection>) =>
   options
     .map(({ id, value }) => `${id}=${String(value)}`)

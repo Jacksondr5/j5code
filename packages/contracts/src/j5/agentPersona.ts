@@ -67,9 +67,27 @@ export const isAgentPersonaAuthorityPolicy = Schema.is(AgentPersonaAuthorityPoli
 export const AgentPersonaReportedAuthorityPolicy = Schema.String;
 export type AgentPersonaReportedAuthorityPolicy = typeof AgentPersonaReportedAuthorityPolicy.Type;
 
+/**
+ * What a linked J5 machine sends with a persona it delegates here: who picked it there, the
+ * caller's access, and the models of the work an independent reviewer reviews. `linkLevel` is set
+ * here, from the link's own approved access, never taken from the wire.
+ */
+export const OrchestrationV2DelegatedPersonaPick = Schema.Struct({
+  pickSource: Schema.Literals(["person", "agent"]),
+  callerAccess: Schema.Struct({
+    runtimeMode: RuntimeMode,
+    sandbox: Schema.optional(Schema.Literals(["readOnly", "workspaceWrite"])),
+  }),
+  authorModels: Schema.Array(Schema.String),
+  authorsPartlyUnknown: Schema.Boolean,
+  linkLevel: Schema.optional(RuntimeMode),
+});
+export type OrchestrationV2DelegatedPersonaPick = typeof OrchestrationV2DelegatedPersonaPick.Type;
+
 export const OrchestrationV2AgentPersonaRequest = Schema.Struct({
   personaId: AgentPersonaId,
   authorityPolicy: Schema.optional(AgentPersonaAuthorityPolicy),
+  delegated: Schema.optional(OrchestrationV2DelegatedPersonaPick),
 });
 export type OrchestrationV2AgentPersonaRequest = typeof OrchestrationV2AgentPersonaRequest.Type;
 

@@ -1294,6 +1294,7 @@ const make = Effect.gen(function* () {
         replay: Option.isSome(launchReceipt),
         providers: providerRegistry.getProviders,
         library: personaLibrary,
+        delegatedPick: { providerRegistry, threads, memberModels },
       }).pipe(Effect.mapError(mapError(input, "resolve-agent-persona")));
       // J5: check the instance the persona resolved to, which is what the thread runs on.
       yield* threads.assertProviderInstanceEnabled({
@@ -1302,8 +1303,12 @@ const make = Effect.gen(function* () {
         instanceId: personaLaunch.modelSelection.instanceId,
       });
       // J5 (register D42): a plain task a linked environment delegates here runs only on a model
-      // this project's Models for custom members allow.
-      if (input.delegatedFrom !== undefined && Option.isNone(launchReceipt)) {
+      // this project's Models for custom members allow; a persona's pick has applied its own limits.
+      if (
+        input.delegatedFrom !== undefined &&
+        input.agentPersona === undefined &&
+        Option.isNone(launchReceipt)
+      ) {
         yield* memberModels
           .assertEligible({ projectId: input.projectId, selection: personaLaunch.modelSelection })
           .pipe(
