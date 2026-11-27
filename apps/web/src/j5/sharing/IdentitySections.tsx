@@ -26,10 +26,16 @@ import { toastManager } from "../../components/ui/toast";
 import { requestConfirmDialog } from "../../confirmDialog";
 import { useNowMinute } from "../../hooks/useNowMinute";
 import { useProjects } from "../../state/entities";
+import {
+  useEnvironment,
+  useEnvironmentHttpBaseUrl,
+  usePrimaryEnvironmentId,
+} from "../../state/environments";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { identityManage, identityQuery, refreshIdentity } from "./identityManage";
+import { joinAddresses } from "./signIn.logic";
 import { levelLabel, raisesToWriting } from "./people.logic";
 import { WritingWarning } from "./ShareDialog";
 import { peopleQuery, refreshSharing, refusalMessage } from "./sharingManage";
@@ -67,31 +73,30 @@ const accountLabel = (account: { readonly name: string | null; readonly email: s
 export function AccessRequestsSection({
   environmentId,
   people,
-  canManage,
   nowMs,
 }: {
   readonly environmentId: EnvironmentId;
   readonly people: ReadonlyArray<PeopleEntry>;
-  readonly canManage: boolean;
   readonly nowMs: number;
 }) {
   const identity = useEnvironmentQuery(identityQuery(environmentId));
+  const server = useEnvironment(environmentId)?.label ?? "this server";
   const requests = identity.data?.requests ?? [];
   if (requests.length === 0) return null;
   const bound = new Set((identity.data?.accounts ?? []).map((account) => account.personId));
   const unbound = people.filter((person) => !bound.has(person.personId));
   return (
     <SettingsSection
-      title="Waiting to be let in"
+      title={`Waiting to be let in to ${server}`}
       description="These accounts signed in through J5 Connect. Signing in never adds anyone: let each one in, or say who they are. A name or email from J5 Connect isn't proof of who someone is, so check with them first."
     >
       {requests.map((request) => (
         <RequestRow
           key={request.accountId}
           environmentId={environmentId}
+          server={server}
           request={request}
           unbound={unbound}
-          canManage={canManage}
           nowMs={nowMs}
         />
       ))}
@@ -111,7 +116,6 @@ export function InboxAccessRequests({
 }
 
 function InboxAccessRequestsFor({ environmentId }: { readonly environmentId: EnvironmentId }) {
-  const canManage = useAtomValue(identityManage.grant.permissionAtom(environmentId));
   const people = useEnvironmentQuery(peopleQuery(environmentId));
   const nowMs = Date.parse(useNowMinute());
   return (
@@ -119,7 +123,6 @@ function InboxAccessRequestsFor({ environmentId }: { readonly environmentId: Env
       <AccessRequestsSection
         environmentId={environmentId}
         people={people.data?.people ?? []}
-        canManage={canManage}
         nowMs={nowMs}
       />
     </div>
@@ -128,20 +131,23 @@ function InboxAccessRequestsFor({ environmentId }: { readonly environmentId: Env
 
 function RequestRow({
   environmentId,
+  server,
   request,
   unbound,
-  canManage,
   nowMs,
 }: {
   readonly environmentId: EnvironmentId;
+  readonly server: string;
   readonly request: AccessRequest;
   readonly unbound: ReadonlyArray<PeopleEntry>;
-  readonly canManage: boolean;
   readonly nowMs: number;
 }) {
   const change = changeRunner(environmentId);
   const bind = useAtomCommand(identityManage.bind, { reportFailure: false });
   const decline = useAtomCommand(identityManage.decline, { reportFailure: false });
+  const canBind = useAtomValue(identityManage.bind.permissionAtom(environmentId));
+  const canGrant = useAtomValue(identityManage.grant.permissionAtom(environmentId));
+  const canDecline = useAtomValue(identityManage.decline.permissionAtom(environmentId));
   const [letIn, setLetIn] = useState(false);
   const [busy, setBusy] = useState(false);
   const label = accountLabel(request);
@@ -149,14 +155,14 @@ function RequestRow({
 
   const bindTo = async (personId: string, personName: string | null) => {
     const confirmed = await requestConfirmDialog(
-      `Is ${label} ${personName ?? "this person"}?`,
+      `Is ${label} ${personName ?? "this person"} on ${server}?`,
       undefined,
       {
         confirmLabel: "Yes, bind",
         content: (
           <p className="text-sm text-muted-foreground">
-            From now on this account signs in as {personName ?? "them"}, on every device. Each
-            person has one account, and each account one person.
+            From now on this account signs in to {server} as {personName ?? "them"}, on every
+            device. Each person has one account, and each account one person.
           </p>
         ),
       },
@@ -183,7 +189,7 @@ function RequestRow({
           {request.suggested === null ? null : (
             <Button
               size="xs"
-              disabled={!canManage || busy}
+              disabled={!canBind || busy}
               onClick={() => void bindTo(request.suggested!.personId, request.suggested!.name)}
             >
               Is this {request.suggested.name}?
@@ -192,7 +198,7 @@ function RequestRow({
           <Button
             size="xs"
             variant={request.suggested === null ? "default" : "outline"}
-            disabled={!canManage || busy}
+            disabled={!canGrant || busy}
             onClick={() => setLetIn((open) => !open)}
           >
             Let in…
@@ -208,7 +214,7 @@ function RequestRow({
               <SelectTrigger
                 size="xs"
                 aria-label="Someone already here"
-                disabled={!canManage || busy}
+                disabled={!canBind || busy}
               >
                 <SelectValue>Someone already here…</SelectValue>
               </SelectTrigger>
@@ -224,7 +230,7 @@ function RequestRow({
           <Button
             size="xs"
             variant="destructive-outline"
-            disabled={!canManage || busy}
+            disabled={!canDecline || busy}
             onClick={() => {
               setBusy(true);
               void change("Could not decline the request", () =>
@@ -237,7 +243,12 @@ function RequestRow({
         </div>
       </div>
       {letIn ? (
-        <LetInForm environmentId={environmentId} request={request} onDone={() => setLetIn(false)} />
+        <LetInForm
+          environmentId={environmentId}
+          server={server}
+          request={request}
+          onDone={() => setLetIn(false)}
+        />
       ) : null}
     </div>
   );
@@ -245,15 +256,18 @@ function RequestRow({
 
 function LetInForm({
   environmentId,
+  server,
   request,
   onDone,
 }: {
   readonly environmentId: EnvironmentId;
+  readonly server: string;
   readonly request: AccessRequest;
   readonly onDone: () => void;
 }) {
   const change = changeRunner(environmentId);
   const grant = useAtomCommand(identityManage.grant, { reportFailure: false });
+  const canGrant = useAtomValue(identityManage.grant.permissionAtom(environmentId));
   const projects = useProjects().filter(
     (project) => project.environmentId === environmentId && project.isScratch !== true,
   );
@@ -298,13 +312,13 @@ function LetInForm({
           <SelectTrigger size="sm" aria-label="Where">
             <SelectValue>
               {where === "server"
-                ? "The whole server"
+                ? `All of ${server}`
                 : (projects.find((project) => project.id === where)?.title ?? "A project")}
             </SelectValue>
           </SelectTrigger>
           <SelectPopup alignItemWithTrigger={false}>
             <SelectItem hideIndicator value="server">
-              The whole server
+              All of {server}
             </SelectItem>
             {projects.map((project) => (
               <SelectItem hideIndicator key={project.id} value={project.id}>
@@ -325,12 +339,16 @@ function LetInForm({
             ))}
           </SelectPopup>
         </Select>
-        <Button size="sm" disabled={busy || name.trim() === ""} onClick={() => void submit()}>
+        <Button
+          size="sm"
+          disabled={!canGrant || busy || name.trim() === ""}
+          onClick={() => void submit()}
+        >
           Let in
         </Button>
       </div>
       {raisesToWriting(null, level) ? <WritingWarning name={name} /> : null}
-      <p className="text-xs text-muted-foreground">They sign in again to start using the server.</p>
+      <p className="text-xs text-muted-foreground">They sign in again to start using {server}.</p>
     </div>
   );
 }
@@ -341,11 +359,9 @@ function LetInForm({
  */
 export function SignInSection({
   environmentId,
-  canManage,
   nowMs,
 }: {
   readonly environmentId: EnvironmentId;
-  readonly canManage: boolean;
   readonly nowMs: number;
 }) {
   const identity = useEnvironmentQuery(identityQuery(environmentId));
@@ -357,13 +373,12 @@ export function SignInSection({
       {identity.data === null ? (
         <p className={ROW_NOTE_CLASSNAME}>{identity.error ?? "Reading sign-in…"}</p>
       ) : identity.data.connect === null ? (
-        <JoinForm environmentId={environmentId} canManage={canManage} />
+        <JoinForm environmentId={environmentId} />
       ) : (
         <Joined
           environmentId={environmentId}
           connect={identity.data.connect}
           accounts={identity.data.accounts}
-          canManage={canManage}
           nowMs={nowMs}
         />
       )}
@@ -371,22 +386,17 @@ export function SignInSection({
   );
 }
 
-/** This browser's own address, offered as one the server is reached at. */
-const ownAddress = () =>
-  window.location.protocol === "http:" || window.location.protocol === "https:"
-    ? [window.location.origin]
-    : [];
-
-function JoinForm({
-  environmentId,
-  canManage,
-}: {
-  readonly environmentId: EnvironmentId;
-  readonly canManage: boolean;
-}) {
+function JoinForm({ environmentId }: { readonly environmentId: EnvironmentId }) {
   const change = changeRunner(environmentId);
   const join = useAtomCommand(identityManage.join, { reportFailure: false });
-  const [addresses] = useState(ownAddress);
+  const canJoin = useAtomValue(identityManage.join.permissionAtom(environmentId));
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const reachedAt = useEnvironmentHttpBaseUrl(environmentId);
+  const addresses = joinAddresses({
+    servesPage: environmentId === primaryEnvironmentId,
+    pageHref: window.location.href,
+    reachedAt,
+  });
   const redirects = useEnvironmentQuery(
     identityManage.returnUrls({ environmentId, input: { addresses } }),
   );
@@ -450,7 +460,7 @@ function JoinForm({
             size="sm"
             className="w-48"
             type="password"
-            autoComplete="off"
+            autoComplete="new-password"
             aria-label="Client secret"
             placeholder="Client secret"
             value={clientSecret}
@@ -459,7 +469,7 @@ function JoinForm({
           <Button
             size="sm"
             disabled={
-              !canManage ||
+              !canJoin ||
               busy ||
               issuer.trim() === "" ||
               clientId.trim() === "" ||
@@ -483,19 +493,18 @@ function Joined({
   environmentId,
   connect,
   accounts,
-  canManage,
   nowMs,
 }: {
   readonly environmentId: EnvironmentId;
   readonly connect: JoinedConnect;
   readonly accounts: ReadonlyArray<BoundAccount>;
-  readonly canManage: boolean;
   readonly nowMs: number;
 }) {
   const change = changeRunner(environmentId);
   const leave = useAtomCommand(identityManage.leave, { reportFailure: false });
   const unbind = useAtomCommand(identityManage.unbind, { reportFailure: false });
   const canLeave = useAtomValue(identityManage.leave.permissionAtom(environmentId));
+  const canUnbind = useAtomValue(identityManage.unbind.permissionAtom(environmentId));
 
   const leaveConnect = async () => {
     const confirmed = await requestConfirmDialog(
@@ -548,7 +557,7 @@ function Joined({
         <Button
           size="xs"
           variant="destructive-outline"
-          disabled={!canManage || !canLeave}
+          disabled={!canLeave}
           onClick={() => void leaveConnect()}
         >
           Leave…
@@ -576,7 +585,7 @@ function Joined({
             <Button
               size="xs"
               variant="outline"
-              disabled={!canManage}
+              disabled={!canUnbind}
               onClick={() => void unbindAccount(account)}
             >
               Unbind…

@@ -239,12 +239,7 @@ function OwnedServerPeople({
 
   return (
     <SettingsPageContainer width="wide">
-      <AccessRequestsSection
-        environmentId={environmentId}
-        people={everyone}
-        canManage={canManage}
-        nowMs={nowMs}
-      />
+      <AccessRequestsSection environmentId={environmentId} people={everyone} nowMs={nowMs} />
       <SettingsSection
         title="People"
         titleAction={
@@ -354,7 +349,7 @@ function OwnedServerPeople({
         )}
       </SettingsSection>
 
-      <SignInSection environmentId={environmentId} canManage={canManage} nowMs={nowMs} />
+      <SignInSection environmentId={environmentId} nowMs={nowMs} />
     </SettingsPageContainer>
   );
 }

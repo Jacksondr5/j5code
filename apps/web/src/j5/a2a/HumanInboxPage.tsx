@@ -87,7 +87,7 @@ import {
 } from "../crew/crewRuntimeRequestsClient";
 import { NativeQuestionInboxSection } from "./NativeQuestionInboxSection";
 import { InboxAccessRequests } from "../sharing/IdentitySections";
-import { ownedAccessRequestsAtom } from "../sharing/identityManage";
+import { ownedAccessRequestsAtom, refreshOwnedIdentities } from "../sharing/identityManage";
 import {
   CrewWorktreeCleanupSection,
   DecidedCleanupRow,
@@ -617,6 +617,7 @@ async function refreshHumanInboxes(environmentId?: EnvironmentId, force = false)
     refreshCrewRuntimeRequests(environmentId),
     refreshWorktreeCleanups(environmentId),
   ]);
+  refreshOwnedIdentities(environmentId);
   const failed = results.flat().find((result) => result._tag === "Failure");
   if (failed?._tag === "Failure") throw Cause.squash(failed.cause);
 }

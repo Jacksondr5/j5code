@@ -9,7 +9,9 @@ import {
   type IdentityDescription,
   type IdentityState,
   J5_IDENTITY_CALLBACK_PATH,
+  type J5AppLinkScheme,
   type JoinedConnect,
+  isJ5AppLinkScheme,
   type PersonLevel,
   type PersonScope,
 } from "@t3tools/contracts/j5";
@@ -174,11 +176,9 @@ export type SignInOutcome =
       /** For a sign-in an app started: the `<scheme>://pair` link that takes it back there. */
       readonly appLink: string | null;
     }
-  | { readonly kind: "waiting" }
-  | { readonly kind: "not-let-in" };
-
-/** The desktop and mobile apps' link schemes, as `readPairingAppLink` accepts them. */
-const APP_SCHEME = /^j5code(?:-[a-z]+)?$/;
+  /** The app that started it, when one did, so the device's next try goes back there too. */
+  | { readonly kind: "waiting"; readonly appScheme: J5AppLinkScheme | null }
+  | { readonly kind: "not-let-in"; readonly appScheme: J5AppLinkScheme | null };
 
 export class AppSchemeRefusedError extends Schema.TaggedError<AppSchemeRefusedError>()(
   "AppSchemeRefusedError",
@@ -222,6 +222,8 @@ export class Identity extends Context.Service<
     readonly describe: Effect.Effect<IdentityDescription, IdentityStorageError>;
     /** The J5 Connect joined, the accounts bound and the requests waiting, for Owners. */
     readonly state: Effect.Effect<IdentityState, IdentityStorageError>;
+    /** How many accounts wait to be let in, for the Inbox's count; reads nothing else. */
+    readonly waitingRequestCount: Effect.Effect<number, IdentityStorageError>;
     /**
      * The return addresses a J5 Connect's operator registers for this server before it joins:
      * one per address it finds itself, and per one of `addresses`.
@@ -800,6 +802,16 @@ const make = Effect.gen(function* () {
       return { connect: connect === null ? null : toConnect(connect), accounts, requests };
     }).pipe(Effect.withSpan("j5.identity.state")),
 
+    // The same standing as `requestStanding`'s "waiting": unbound, asked within a week, undecided.
+    waitingRequestCount: Effect.gen(function* () {
+      const since = yield* ago(REQUEST_LIFETIME);
+      const [row] = yield* sql<{ readonly n: number }>`
+        SELECT COUNT(*) AS n FROM j5_identity_account
+        WHERE person_id IS NULL AND declined_at IS NULL AND requested_at > ${since}
+      `.pipe(Effect.mapError(storage("count the accounts waiting")));
+      return row?.n ?? 0;
+    }).pipe(Effect.withSpan("j5.identity.waitingRequestCount")),
+
     returnUrls,
 
     join: Effect.fn("j5.identity.join")(function* (input) {
@@ -862,7 +874,7 @@ const make = Effect.gen(function* () {
     leave,
 
     startSignIn: Effect.fn("j5.identity.startSignIn")(function* ({ origin, appScheme }) {
-      if (appScheme !== null && !APP_SCHEME.test(appScheme)) {
+      if (appScheme !== null && !isJ5AppLinkScheme(appScheme)) {
         return yield* new AppSchemeRefusedError({});
       }
       const connect = yield* requireConnect;
@@ -916,6 +928,7 @@ const make = Effect.gen(function* () {
       `.pipe(Effect.mapError(storage("finish a sign-in")));
       const pending = taken[0];
       if (pending === undefined) return yield* new SignInExpiredError({});
+      const appScheme = isJ5AppLinkScheme(pending.app_scheme) ? pending.app_scheme : null;
       const connect = yield* requireConnect;
       const secret = yield* clientSecret;
       const discovery = yield* withHttp(Oidc.discover(connect.issuer));
@@ -975,9 +988,9 @@ const make = Effect.gen(function* () {
             );
             // The app adds the server from the same pairing link a person would scan.
             const appLink =
-              pending.app_scheme === null
+              appScheme === null
                 ? null
-                : `${pending.app_scheme}://pair?${new URLSearchParams([
+                : `${appScheme}://pair?${new URLSearchParams([
                     ["pairingUrl", `${input.origin}/#token=${encodeURIComponent(credential)}`],
                   ])}`;
             return { kind: "pair" as const, credential, appLink };
@@ -987,7 +1000,7 @@ const make = Effect.gen(function* () {
               UPDATE j5_identity_account SET refresh_token = NULL, last_confirmed_at = NULL
               WHERE account_id = ${account.account_id}
             `;
-            return { kind: "not-let-in" as const };
+            return { kind: "not-let-in" as const, appScheme };
           }
           // Waiting, or asking afresh: the confirmed token is kept on the request, so a binding
           // is confirmed from the start.
@@ -999,7 +1012,7 @@ const make = Effect.gen(function* () {
               declined_at = NULL
             WHERE account_id = ${account.account_id}
           `;
-          return { kind: "waiting" as const };
+          return { kind: "waiting" as const, appScheme };
         }),
       );
       if (outcome.kind === "waiting") yield* peopleChanged;

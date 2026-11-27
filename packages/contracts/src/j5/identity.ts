@@ -53,6 +53,12 @@ export const J5_SIGN_IN_OUTCOME_PARAM = "j5-sign-in";
  */
 export const J5_SIGN_IN_APP_PARAM = "app";
 
+/** The J5 Code apps' link schemes, one per channel (scripts/lib/j5-branding.ts); no other. */
+const J5_APP_LINK_SCHEMES = ["j5code", "j5code-dev", "j5code-preview"] as const;
+export type J5AppLinkScheme = (typeof J5_APP_LINK_SCHEMES)[number];
+export const isJ5AppLinkScheme = (value: string | null | undefined): value is J5AppLinkScheme =>
+  (J5_APP_LINK_SCHEMES as ReadonlyArray<string | null | undefined>).includes(value);
+
 export const IdentityDescription = Schema.Struct({
   /** The J5 Connect's host, to name it on the button; `null` when the server trusts none. */
   signIn: Schema.NullOr(Schema.Struct({ host: Schema.String })),

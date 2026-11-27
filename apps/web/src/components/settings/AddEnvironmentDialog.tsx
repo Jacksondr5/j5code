@@ -451,7 +451,9 @@ export function AddEnvironmentDialog({
         </span>
       </div>
       {/* J5: sign in at the server instead, through the system browser (FORK.md case 123). */}
-      <SignInToAddServer host={savedBackendHost} disabled={isAddingSavedBackend} />
+      {routeTarget === null ? (
+        <SignInToAddServer host={savedBackendHost} disabled={isAddingSavedBackend} />
+      ) : null}
     </div>
   );
   const relayRouteOffer =

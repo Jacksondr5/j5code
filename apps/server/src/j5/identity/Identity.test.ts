@@ -171,7 +171,7 @@ const grantAs = Effect.fn("test.grantAs")(function* (
 ) {
   const identity = yield* Identity.Identity;
   yield* addUser(subject, name);
-  assert.deepStrictEqual(yield* signIn(subject), { kind: "waiting" });
+  assert.deepStrictEqual(yield* signIn(subject), { kind: "waiting", appScheme: null });
   const request = (yield* identity.state).requests.find(
     (entry) => entry.email === `${subject}@example.test`,
   )!;
@@ -262,8 +262,8 @@ it.effect("an account that is no one yet waits for an Owner, and sign-in makes n
     yield* addUser("hopper", "Hopper");
     const before = yield* countPeople;
 
-    assert.deepStrictEqual(yield* signIn("grace"), { kind: "waiting" });
-    assert.deepStrictEqual(yield* signIn("grace"), { kind: "waiting" });
+    assert.deepStrictEqual(yield* signIn("grace"), { kind: "waiting", appScheme: null });
+    assert.deepStrictEqual(yield* signIn("grace"), { kind: "waiting", appScheme: null });
     const state = yield* identity.state;
     assert.strictEqual(state.requests.length, 1);
     assert.strictEqual(state.requests[0]!.email, "grace@example.test");
@@ -272,7 +272,7 @@ it.effect("an account that is no one yet waits for an Owner, and sign-in makes n
     // Declined: "not let in" for a week, and no decision on it is taken twice.
     const graceRequest = state.requests[0]!.accountId;
     yield* identity.decline(graceRequest);
-    assert.deepStrictEqual(yield* signIn("grace"), { kind: "not-let-in" });
+    assert.deepStrictEqual(yield* signIn("grace"), { kind: "not-let-in", appScheme: null });
     assert.strictEqual((yield* identity.state).requests.length, 0);
     const owner = yield* person("Someone", [{ scope: { kind: "server" }, level: "viewer" }]);
     assert.strictEqual(
@@ -282,12 +282,12 @@ it.effect("an account that is no one yet waits for an Owner, and sign-in makes n
     );
 
     // Expired undecided says the same, from when it expired.
-    assert.deepStrictEqual(yield* signIn("hopper"), { kind: "waiting" });
+    assert.deepStrictEqual(yield* signIn("hopper"), { kind: "waiting", appScheme: null });
     yield* TestClock.adjust("8 days");
-    assert.deepStrictEqual(yield* signIn("hopper"), { kind: "not-let-in" });
-    assert.deepStrictEqual(yield* signIn("grace"), { kind: "waiting" });
+    assert.deepStrictEqual(yield* signIn("hopper"), { kind: "not-let-in", appScheme: null });
+    assert.deepStrictEqual(yield* signIn("grace"), { kind: "waiting", appScheme: null });
     yield* TestClock.adjust("7 days");
-    assert.deepStrictEqual(yield* signIn("hopper"), { kind: "waiting" });
+    assert.deepStrictEqual(yield* signIn("hopper"), { kind: "waiting", appScheme: null });
     assert.strictEqual(yield* countPeople, before + 1);
   }).pipe(Effect.provide(makeLayer())),
 );
@@ -324,8 +324,8 @@ it.effect("an Owner binds a waiting account to someone here, once each way", () 
     const other = yield* person("Other", [{ scope: { kind: "server" }, level: "viewer" }]);
     yield* addUser("lin", "Lin");
     yield* addUser("lin-second", "Lin");
-    assert.deepStrictEqual(yield* signIn("lin"), { kind: "waiting" });
-    assert.deepStrictEqual(yield* signIn("lin-second"), { kind: "waiting" });
+    assert.deepStrictEqual(yield* signIn("lin"), { kind: "waiting", appScheme: null });
+    assert.deepStrictEqual(yield* signIn("lin-second"), { kind: "waiting", appScheme: null });
 
     const requests = (yield* identity.state).requests;
     const first = requests.find((request) => request.email === "lin@example.test")!;
@@ -350,7 +350,7 @@ it.effect("an Owner binds a waiting account to someone here, once each way", () 
       (yield* Effect.flip(identity.unbind(lin.personId)))._tag,
       "PersonNotBoundError",
     );
-    assert.deepStrictEqual(yield* signIn("lin"), { kind: "waiting" });
+    assert.deepStrictEqual(yield* signIn("lin"), { kind: "waiting", appScheme: null });
   }).pipe(Effect.provide(makeLayer())),
 );
 
@@ -410,8 +410,34 @@ it.effect("a sign-in an app started goes back to it as the pairing link it would
     const browser = yield* signIn("ada");
     assert.isTrue(browser.kind === "pair" && browser.appLink === null);
 
-    const elsewhere = yield* Effect.flip(identity.startSignIn({ origin, appScheme: "https" }));
-    assert.strictEqual(elsewhere._tag, "AppSchemeRefusedError");
+    // Only J5's own three schemes, not anything shaped like them.
+    for (const appScheme of ["https", "j5code-evil"]) {
+      const elsewhere = yield* Effect.flip(identity.startSignIn({ origin, appScheme }));
+      assert.strictEqual(elsewhere._tag, "AppSchemeRefusedError", appScheme);
+    }
+  }).pipe(Effect.provide(makeLayer())),
+);
+
+it.effect("an app's sign-in that waits keeps its app through the Owner's approval", () =>
+  Effect.gen(function* () {
+    const identity = yield* Identity.Identity;
+    yield* joined;
+    yield* addUser("grace", "Grace");
+    const origin = yield* firstOrigin;
+    // Launched from the desktop app: told to wait, and the outcome still names the app.
+    const waiting = yield* identity.completeSignIn(yield* startedAs("grace", origin, "j5code"));
+    assert.deepStrictEqual(waiting, { kind: "waiting", appScheme: "j5code" });
+    const [request] = (yield* identity.state).requests;
+    yield* identity.grant({
+      accountId: request!.accountId,
+      name: "Grace",
+      scope: { kind: "server" },
+      level: "viewer",
+    });
+    // The retry the page offers carries the app again, and goes back to it.
+    const retried = yield* identity.completeSignIn(yield* startedAs("grace", origin, "j5code"));
+    if (retried.kind !== "pair") return assert.fail(retried.kind);
+    assert.isTrue(retried.appLink?.startsWith("j5code://pair?") === true);
   }).pipe(Effect.provide(makeLayer())),
 );
 
@@ -759,7 +785,7 @@ it.effect("a sign-in without offline access is refused, and an unverified email 
       active: true,
       emailVerified: false,
     });
-    assert.deepStrictEqual(yield* signIn("hopper"), { kind: "waiting" });
+    assert.deepStrictEqual(yield* signIn("hopper"), { kind: "waiting", appScheme: null });
     const [request] = (yield* identity.state).requests;
     assert.strictEqual(request!.name, "Hopper");
     assert.isNull(request!.email);

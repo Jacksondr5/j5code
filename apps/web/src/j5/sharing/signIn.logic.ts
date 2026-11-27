@@ -3,8 +3,11 @@ import {
   J5_IDENTITY_SIGN_IN_PATH,
   J5_SIGN_IN_APP_PARAM,
   J5_SIGN_IN_OUTCOME_PARAM,
+  type J5AppLinkScheme,
   SignInOutcome,
+  isJ5AppLinkScheme,
 } from "@t3tools/contracts/j5";
+import { resolveRemotePairingTarget } from "@t3tools/shared/remote";
 import * as Schema from "effect/Schema";
 
 const decodeDescription = Schema.decodeUnknownOption(IdentityDescription);
@@ -23,10 +26,19 @@ export function signInOutcomeOf(href: string): SignInOutcome | null {
 }
 
 /**
+ * The app a sign-in was started from, named on the pairing page's address after it came back
+ * without pairing, so the next try goes back to the app too; `null` for a browser's own.
+ */
+export function signInAppOf(href: string): J5AppLinkScheme | null {
+  const value = new URL(href).searchParams.get(J5_SIGN_IN_APP_PARAM);
+  return isJ5AppLinkScheme(value) ? value : null;
+}
+
+/**
  * Where a browser or app starts signing in at a server. An app passes its own link scheme, so a
  * sign-in that pairs comes back to it.
  */
-export function signInUrl(serverBase: string, appScheme: string | null = null): string {
+export function signInUrl(serverBase: string, appScheme: J5AppLinkScheme | null = null): string {
   const url = new URL(J5_IDENTITY_SIGN_IN_PATH, serverBase);
   if (appScheme !== null) url.searchParams.set(J5_SIGN_IN_APP_PARAM, appScheme);
   return url.toString();
@@ -36,27 +48,56 @@ export function signInUrl(serverBase: string, appScheme: string | null = null): 
  * The desktop app's own link scheme, read from the address its window is served from
  * (`j5code://app/`, `j5code-dev://app/`); `null` outside the desktop app.
  */
-export function desktopAppScheme(protocol: string): string | null {
-  return /^j5code(?:-[a-z]+)?:$/.test(protocol) ? protocol.slice(0, -1) : null;
+export function desktopAppScheme(protocol: string): J5AppLinkScheme | null {
+  const scheme = protocol.endsWith(":") ? protocol.slice(0, -1) : protocol;
+  return isJ5AppLinkScheme(scheme) ? scheme : null;
 }
 
+const LOOPBACK_OR_IP = /^(localhost|\d{1,3}(\.\d{1,3}){3}|\[[0-9a-f:]+\])(:\d+)?$/i;
+
 /**
- * A server's address from what a person typed: as given with its scheme, plain HTTP for this
- * machine, an IP address or an address with a port, and HTTPS for a name. `null` for nothing usable.
+ * A server's address from what a person typed into Add environment: upstream's own reading of a
+ * host, which takes a name to HTTPS, except that this machine and an IP address stay plain HTTP,
+ * as on a local network. `null` for nothing usable.
  */
 export function serverBaseFromHost(typed: string): string | null {
   const host = typed.trim();
   if (host === "") return null;
-  const plain =
-    /^(localhost|\d{1,3}(\.\d{1,3}){3}|\[[0-9a-f:]+\])(:\d+)?$/i.test(host) || /:\d+$/.test(host);
   try {
-    const url = new URL(
-      /^https?:\/\//i.test(host) ? host : `${plain ? "http" : "https"}://${host}`,
-    );
+    const written = LOOPBACK_OR_IP.test(host) ? `http://${host}` : host;
+    // The code is never sent: only the address upstream reads from the host is kept.
+    return new URL(
+      resolveRemotePairingTarget({ host: written, pairingCode: "sign-in" }).httpBaseUrl,
+    ).origin;
+  } catch {
+    return null;
+  }
+}
+
+const httpOrigin = (address: string): string | null => {
+  try {
+    const url = new URL(address);
     return url.protocol === "http:" || url.protocol === "https:" ? url.origin : null;
   } catch {
     return null;
   }
+};
+
+/**
+ * The address a server joining J5 Connect is offered as one people reach it at: the page's own
+ * when that server serves the page, otherwise the address this client reaches it at, if any.
+ */
+export function joinAddresses(input: {
+  readonly servesPage: boolean;
+  readonly pageHref: string;
+  readonly reachedAt: string | null;
+}): ReadonlyArray<string> {
+  const address = input.servesPage
+    ? httpOrigin(input.pageHref)
+    : input.reachedAt === null
+      ? null
+      : httpOrigin(input.reachedAt);
+  return address === null ? [] : [address];
 }
 
 export const SIGN_IN_OUTCOME_WORDS: Record<

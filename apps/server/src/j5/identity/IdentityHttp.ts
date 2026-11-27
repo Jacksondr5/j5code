@@ -7,6 +7,7 @@ import {
   J5_IDENTITY_DESCRIBE_PATH,
   J5_IDENTITY_SIGN_IN_PATH,
   J5_SIGN_IN_APP_PARAM,
+  isJ5AppLinkScheme,
   J5_SIGN_IN_OUTCOME_PARAM,
   JoinConnectRequest,
   JoinedConnectJson,
@@ -38,11 +39,20 @@ const decodeJoin = Schema.decodeUnknownEffect(JoinConnectRequest);
 const decodeReturnUrls = Schema.decodeUnknownEffect(ReturnUrlsRequest);
 const encodeJoined = Schema.encodeSync(JoinedConnectJson);
 
-/** Back to the pairing page, which exchanges a credential as it does a link's. */
-const toPairing = (outcome: SignInOutcome | { readonly credential: string }) =>
+/**
+ * Back to the pairing page, which exchanges a credential as it does a link's. An outcome for a
+ * sign-in an app started names the app, so the page's next try goes back to it too.
+ */
+const toPairing = (
+  outcome: SignInOutcome | { readonly credential: string },
+  appScheme: string | null = null,
+) =>
   HttpServerResponse.redirect(
     typeof outcome === "string"
-      ? `/pair?${J5_SIGN_IN_OUTCOME_PARAM}=${outcome}`
+      ? `/pair?${new URLSearchParams({
+          [J5_SIGN_IN_OUTCOME_PARAM]: outcome,
+          ...(isJ5AppLinkScheme(appScheme) ? { [J5_SIGN_IN_APP_PARAM]: appScheme } : {}),
+        })}`
       : `/pair#token=${encodeURIComponent(outcome.credential)}`,
     { headers: NO_STORE },
   );
@@ -85,7 +95,7 @@ export const identityHttpRouteLayer = Layer.unwrap(
           Effect.map((location) => HttpServerResponse.redirect(location, { headers: NO_STORE })),
           Effect.catch((cause) =>
             Effect.logWarning("J5 sign-in could not start", { cause }).pipe(
-              Effect.as(toPairing("failed")),
+              Effect.as(toPairing("failed", appScheme)),
             ),
           ),
         );
@@ -107,7 +117,7 @@ export const identityHttpRouteLayer = Layer.unwrap(
         return yield* identity.completeSignIn({ state, code, origin: url.value.origin }).pipe(
           Effect.map((outcome) =>
             outcome.kind !== "pair"
-              ? toPairing(outcome.kind)
+              ? toPairing(outcome.kind, outcome.appScheme)
               : outcome.appLink !== null
                 ? HttpServerResponse.redirect(outcome.appLink, { headers: NO_STORE })
                 : toPairing(outcome),

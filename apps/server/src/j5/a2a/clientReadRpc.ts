@@ -66,7 +66,7 @@ const isParticipantId = Schema.is(ParticipantId);
 
 /** Handlers for `J5ClientReadRpcGroup`: each calls one service method and maps its failure. */
 export const makeClientReadRpcHandlers = Effect.fn("j5.makeClientReadRpcHandlers")(function* (
-  session: SessionIdentity,
+  session: SessionIdentity & { readonly scopes: ReadonlyArray<string> },
 ) {
   const clientReads = yield* ClientReadsService;
   const peers = yield* PeerAdminService;
@@ -96,12 +96,13 @@ export const makeClientReadRpcHandlers = Effect.fn("j5.makeClientReadRpcHandlers
       .crewWorktreeCleanups(status)
       .pipe(Effect.catch(failed("Reading worktree cleanups failed.")));
   });
+  // Counted for whoever the Inbox lists requests to: an Owner whose device may see who has access.
   const accessRequestsWaiting = Effect.gen(function* () {
-    if (Option.isNone(identity)) return 0;
+    if (Option.isNone(identity) || !session.scopes.includes(AuthAccessReadScope)) return 0;
     if (!(yield* isOwner(session).pipe(Effect.provideService(PersonAccess, people)))) return 0;
-    return (yield* identity.value.state.pipe(
+    return yield* identity.value.waitingRequestCount.pipe(
       Effect.catch(failed("Reading access requests failed.")),
-    )).requests.length;
+    );
   });
   return {
     [METHODS.listHumanInbox]: (input: HumanInboxListRequest) =>

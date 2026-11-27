@@ -465,7 +465,8 @@ export const refresh = Effect.fn("j5.identity.oidc.refresh")(function* (input: {
   if (identity.subject !== input.subject) {
     return yield* new OidcError({ stage: "id_token", status: "subject", httpStatus: 200 });
   }
-  return tokens.refresh_token ?? input.refreshToken;
+  // An empty token is none: the one kept stays.
+  return tokens.refresh_token || input.refreshToken;
 });
 
 /**

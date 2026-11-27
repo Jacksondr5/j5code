@@ -46,6 +46,12 @@ export function refreshIdentity(environmentId: EnvironmentId) {
   appAtomRegistry.refresh(identityQuery(environmentId));
 }
 
+/** Reads again the requests the Inbox lists: one server's, or every owned server's. */
+export function refreshOwnedIdentities(environmentId?: EnvironmentId) {
+  const owned = appAtomRegistry.get(ownedEnvironmentIdsAtom);
+  for (const id of environmentId === undefined ? owned : [environmentId]) refreshIdentity(id);
+}
+
 /**
  * The servers this person owns with accounts waiting to be let in, for the Inbox (J5 Connect,
  * decision 4). A server that has not answered counts as having none.
