@@ -553,11 +553,12 @@ export const layer: Layer.Layer<
             input.provenance.source === "j5_spawn" &&
             !(yield* isCurrentParticipant(input.projectId, input.provenance.spawnedByParticipantId))
           ) {
-            // A spawner may spawn into another project. It is recorded as provenance and is no
-            // parent there: the placement tree is one project's, so the agent is a root in its
-            // own. An outside agent is in no project, so what it spawns is always a root. Any
-            // other spawner that is in no project at all is returned for `ensureParent` to refuse.
+            // The placement tree is one project's, so a spawner elsewhere is provenance, not a
+            // parent. An outside agent or a spawner on a linked machine is in no project here, so
+            // what it spawns is a root; any other spawner in no project is left for `ensureParent`
+            // to refuse.
             return isOutsideAgentParticipantId(input.provenance.spawnedByParticipantId) ||
+              input.provenance.spawnedByEnvironmentId !== undefined ||
               (yield* isParticipantSomewhere(input.provenance.spawnedByParticipantId))
               ? null
               : input.provenance.spawnedByParticipantId;
@@ -641,16 +642,18 @@ export const layer: Layer.Layer<
           : input.provenance.kind === "forked-from"
             ? input.provenance.sourceParticipantId
             : null;
-      if (provenanceParticipantId !== null) {
+      const spawnedByJ5 =
+        input.provenance.kind === "spawned-by" && input.provenance.source === "j5_spawn";
+      const spawnedFromLinkedMachine =
+        input.provenance.kind === "spawned-by" &&
+        input.provenance.source === "j5_spawn" &&
+        input.provenance.spawnedByEnvironmentId !== undefined;
+      if (provenanceParticipantId !== null && !spawnedFromLinkedMachine) {
         // Immutable provenance may retain a departed source, but it must name
         // an identity that actually joined at least once: this project for a fork's source,
         // any project on this server for a spawner, which may spawn into another project.
-        // An outside agent spawner joins none.
-        yield* ensureProvenanceParticipant(
-          input.projectId,
-          provenanceParticipantId,
-          input.provenance.kind === "spawned-by" && input.provenance.source === "j5_spawn",
-        );
+        // An outside agent spawner, or one on a linked machine, joins none here.
+        yield* ensureProvenanceParticipant(input.projectId, provenanceParticipantId, spawnedByJ5);
       }
       if (provenanceParticipantId === input.participantId) {
         return yield* new PlacementCycleError({

@@ -16,6 +16,7 @@ import * as Layer from "effect/Layer";
 import { PeerForwarding } from "../../../peer/PeerForwarding.ts";
 import { PeerLinkRequests } from "../../../peer/PeerLinkRequests.ts";
 import { PeerLinks } from "../../../peer/PeerLinks.ts";
+import { PeerMcpClient } from "../../../peer/PeerMcpClient.ts";
 import { RemoteDelegation } from "../../../peer/RemoteDelegation.ts";
 import * as Schema from "effect/Schema";
 import { HttpBody, HttpClient, HttpRouter } from "effect/http";
@@ -203,6 +204,7 @@ it.effect("production mcp layer lists worktree tools over http", () =>
             Layer.mock(PeerForwarding)({}),
             Layer.mock(PeerLinkRequests)({}),
             Layer.mock(PeerLinks)({}),
+            Layer.mock(PeerMcpClient)({}),
           ),
         ),
         Layer.provide(
@@ -646,6 +648,7 @@ it.effect("offers t3_thread_launch to another environment's link and lets it cal
             Layer.mock(PeerForwarding)({}),
             Layer.mock(PeerLinkRequests)({}),
             Layer.mock(PeerLinks)({}),
+            Layer.mock(PeerMcpClient)({}),
           ),
         ),
         Layer.provide(

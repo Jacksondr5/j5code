@@ -9,6 +9,7 @@ export const ownPeerCapabilities = {
   poll: true,
   landing: true,
   line: true,
+  spawn: true,
 } satisfies PeerCapabilities;
 
 /**

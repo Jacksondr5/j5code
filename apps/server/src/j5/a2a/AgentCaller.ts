@@ -18,6 +18,12 @@ class J5AgentToolStateError extends Schema.TaggedError<J5AgentToolStateError>()(
 export const stateError = (state: string, nextCommand: string) =>
   new J5AgentToolStateError({ state, nextCommand });
 
+/** A linked server's refusal, or the link's own failure, keeping its code as the tool failure's. */
+export class J5PeerToolError extends Schema.TaggedError<J5PeerToolError>()("J5PeerToolError", {
+  code: Schema.String,
+  message: Schema.String,
+}) {}
+
 /** A refused persona launch, whose code (`persona_disabled` and so on) is the tool failure's. */
 export class J5PersonaBlockedError extends Schema.TaggedError<J5PersonaBlockedError>()(
   "J5PersonaBlockedError",

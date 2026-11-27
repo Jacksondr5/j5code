@@ -55,6 +55,26 @@ export const findPeerCounterparty = Effect.fn("j5.a2a.peerCounterparty")(functio
   return inbound[0] === undefined ? null : toCounterparty(inbound[0]);
 });
 
+/** Records where a participant on a peer server lives, before any message has crossed. */
+export const recordPeerRoute = Effect.fn("j5.a2a.recordPeerRoute")(function* (
+  sql: SqlClient.SqlClient,
+  input: {
+    readonly participantId: ParticipantId;
+    readonly environmentId: string;
+    readonly projectId: LedgerProjectId;
+    readonly recordedAt: string;
+  },
+) {
+  yield* sql`
+    INSERT INTO j5_a2a_peer_route (participant_id, environment_id, project_id, recorded_at)
+    VALUES (${input.participantId}, ${input.environmentId}, ${input.projectId}, ${input.recordedAt})
+    ON CONFLICT (participant_id) DO UPDATE SET
+      environment_id = excluded.environment_id,
+      project_id = excluded.project_id,
+      recorded_at = excluded.recorded_at
+  `;
+});
+
 /** The latest route the ledger recorded for a participant, for a send that opens nothing yet. */
 export const findPeerRoute = Effect.fn("j5.a2a.peerRoute")(function* (
   sql: SqlClient.SqlClient,
@@ -79,7 +99,11 @@ export const findPeerRoute = Effect.fn("j5.a2a.peerRoute")(function* (
     ORDER BY seq DESC
     LIMIT 1
   `;
-  return inbound[0] === undefined ? null : toCounterparty(inbound[0]);
+  if (inbound[0] !== undefined) return toCounterparty(inbound[0]);
+  const recorded = yield* sql<RouteRow>`
+    SELECT environment_id, project_id FROM j5_a2a_peer_route WHERE participant_id = ${participantId}
+  `;
+  return recorded[0] === undefined ? null : toCounterparty(recorded[0]);
 });
 
 /** Whether any recorded route places the participant on a server other than the one given. */
@@ -102,6 +126,10 @@ export const isRoutedElsewhere = Effect.fn("j5.a2a.peerRoutedElsewhere")(functio
           AND sender = ${participantId}
           AND json_extract(payload, '$.originEnvironmentId') IS NOT NULL
           AND json_extract(payload, '$.originEnvironmentId') <> ${environmentId}
+      )
+      OR EXISTS (
+        SELECT 1 FROM j5_a2a_peer_route
+        WHERE participant_id = ${participantId} AND environment_id <> ${environmentId}
       )
     ) AS elsewhere
   `;

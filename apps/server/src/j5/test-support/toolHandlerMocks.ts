@@ -10,6 +10,7 @@ import { ArchiveCrewService } from "../a2a/ArchiveCrewService.ts";
 import { CrewProposalService } from "../a2a/CrewProposalService.ts";
 import { CrewStopService } from "../a2a/CrewStopService.ts";
 import { ParticipantPlacementService } from "../a2a/PlacementService.ts";
+import { PeerMcpClient } from "../../peer/PeerMcpClient.ts";
 import { PeerDirectory } from "../a2a/PeerDirectory.ts";
 import { PeerRegistryService } from "../a2a/PeerRegistryService.ts";
 import { RequestReplayService } from "../a2a/RequestReplayService.ts";
@@ -38,6 +39,7 @@ export const j5ToolHandlerMocks = Layer.mergeAll(
   Layer.mock(CrewStopService)({}),
   Layer.mock(ParticipantPlacementService)({}),
   Layer.mock(PeerDirectory)({}),
+  Layer.mock(PeerMcpClient)({}),
   Layer.mock(PeerRegistryService)({}),
   Layer.mock(PlaybookCrewRelay)({}),
   Layer.mock(PlaybookStore)({}),

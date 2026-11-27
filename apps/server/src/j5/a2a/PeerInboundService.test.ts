@@ -25,6 +25,7 @@ import {
   type PeerInboundInput,
 } from "./PeerInboundService.ts";
 import { A2ASendService, layer as sendLayer } from "./SendService.ts";
+import { recordPeerRoute } from "./peerCounterparty.ts";
 import {
   CommCommandId,
   CorrelationId,
@@ -623,6 +624,26 @@ it.effect("lets a peer speak only for agents it owns, and end only Exchanges it 
         }),
       );
       assert.equal(impostor._tag, "A2APeerSenderNotOwnedError");
+      // An agent a spawn recorded on Home, before any message: refused from another peer too.
+      const spawned = ParticipantId.make("agent:j5:a2a:thread:spawned");
+      yield* recordPeerRoute(sql, {
+        participantId: spawned,
+        environmentId: homeEnvironment,
+        projectId: homeProject,
+        recordedAt: timestamp,
+      });
+      const spawnedImpostor = yield* Effect.flip(
+        inbound.receive({
+          ...askWithoutIntent,
+          senderId: spawned,
+          originEnvironmentId: "environment-stranger",
+          messageId: "message:j5:a2a:spawned-impostor",
+          correlationId: "correlation:j5:a2a:spawned-impostor",
+          exchangeRole: "none",
+          exchangeId: null,
+        }),
+      );
+      assert.equal(spawnedImpostor._tag, "A2APeerSenderNotOwnedError");
       // A peer claiming one of our own agents as its sender: refused too.
       const localClaim = yield* Effect.flip(
         inbound.receive({

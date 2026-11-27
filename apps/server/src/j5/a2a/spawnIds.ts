@@ -33,6 +33,13 @@ export const lifecycleId = (
     stablePart(input.requestKey),
   ].join(":");
 
+/**
+ * A spawn's retry key as it leaves for a linked server, where every caller here is the one link
+ * session: scoped to its caller, as upstream's forwarding scopes its own keys.
+ */
+export const peerSpawnRequestKey = (namespace: string, requestKey: string) =>
+  `fwd:${NodeCrypto.createHash("sha256").update(`${namespace}\n${requestKey}`).digest("hex")}`;
+
 export const lifecycleCommandId = (input: SpawnStableInput & { readonly operation: string }) =>
   CommandId.make(lifecycleId({ kind: "command", ...input }));
 
@@ -132,13 +139,18 @@ export const spawnFirstTurnText = (input: {
   readonly spawnerThreadId?: string | undefined;
   /** Set when the spawner is an outside agent: the label its client signed in with. */
   readonly outsideAgentName?: string | undefined;
+  /** Set when the spawner runs on another J5 server: that server's name here. */
+  readonly spawnerServer?: string | undefined;
   readonly crew?: CrewBriefContext;
 }) => {
   // Every line stays a `key: value` fact, which is what the web parser reads and skips.
   const spawner =
-    input.outsideAgentName === undefined
-      ? `spawner_thread_id: ${input.spawnerThreadId ?? ""}`
-      : `spawned_by_outside_agent: ${briefLine(input.outsideAgentName) || "unnamed"}\nspawner_reply: You were started by an outside agent: one that runs outside this app. You cannot reply to it with j5_send_message.`;
+    input.outsideAgentName !== undefined
+      ? `spawned_by_outside_agent: ${briefLine(input.outsideAgentName) || "unnamed"}\nspawner_reply: You were started by an outside agent: one that runs outside this app. You cannot reply to it with j5_send_message.`
+      : input.spawnerServer !== undefined
+        ? // No spawner_thread_id: clients link it to a thread here, and this one is on that server.
+          `spawner_server: ${briefLine(input.spawnerServer) || "unnamed"}\nspawner_reply: Your spawner runs on another J5 server. Reply to it with j5_send_message to spawned_by; the message reaches that server.`
+        : `spawner_thread_id: ${input.spawnerThreadId ?? ""}`;
   const identity = `<j5_spawn_context>\nPlatform-provided identity facts:\nparticipant_id: ${input.participantId}\nproject_id: ${input.projectId}\nproject_title: ${input.projectTitle}\nspawned_by: ${input.spawnedByParticipantId}\n${spawner}\n</j5_spawn_context>`;
   const brief = `<spawner_brief>\n${input.brief}\n</spawner_brief>`;
   if (input.crew === undefined) return `${identity}\n\n${brief}`;

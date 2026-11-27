@@ -2,6 +2,7 @@ import * as Clock from "effect/Clock";
 import * as Layer from "effect/Layer";
 import * as SpawnAgentService from "../SpawnAgentService.ts";
 import {
+  J5PeerToolError,
   J5PersonaBlockedError,
   preflightSpawnCaller,
   resolveCallerMembership,
@@ -100,16 +101,18 @@ import {
 } from "./tools.ts";
 
 const isJ5PersonaBlockedError = Schema.is(J5PersonaBlockedError);
+const isJ5PeerToolError = Schema.is(J5PeerToolError);
 const isArchiveCrewConfirmationRequiredError = Schema.is(ArchiveCrewConfirmationRequiredError);
 const isArchiveCrewConfirmationStaleError = Schema.is(ArchiveCrewConfirmationStaleError);
 const isArchiveCrewPartialFailureError = Schema.is(ArchiveCrewPartialFailureError);
 
 const failure = (error: unknown): J5McpFailure => ({
-  code: isJ5PersonaBlockedError(error)
-    ? error.code
-    : typeof error === "object" && error !== null && "_tag" in error
-      ? String(error._tag)
-      : "J5A2AError",
+  code:
+    isJ5PersonaBlockedError(error) || isJ5PeerToolError(error)
+      ? error.code
+      : typeof error === "object" && error !== null && "_tag" in error
+        ? String(error._tag)
+        : "J5A2AError",
   message: error instanceof Error ? error.message : String(error),
 });
 
