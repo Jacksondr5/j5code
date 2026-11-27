@@ -20,7 +20,6 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Ref from "effect/Ref";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as HttpClient from "effect/http/HttpClient";
@@ -183,6 +182,9 @@ const REQUEST_LIFETIME = Duration.days(7);
 /** An account J5 Connect has not confirmed for this long loses its sign-in sessions. */
 const CONFIRMATION_LAPSE = Duration.hours(24);
 const CONFIRMATION_INTERVAL = Duration.hours(1);
+/** A day of hourly passes: past this many with no answer, J5 Connect counts as gone. */
+const PASSES_IN_A_LAPSE =
+  Duration.toMillis(CONFIRMATION_LAPSE) / Duration.toMillis(CONFIRMATION_INTERVAL);
 /** Refreshes run side by side, each bounded on its own, so one slow account holds up none. */
 const REFRESH_CONCURRENCY = 4;
 
@@ -377,9 +379,6 @@ const make = Effect.gen(function* () {
   const directEndpoints = yield* Effect.serviceOption(DirectEndpoints.DirectEndpoints);
   // A request waits in its Owners' Inbox as well as on the People page.
   const peopleChanged = (yield* ReadChanges).notify("sharing", "inbox");
-  // Since when J5 Connect has given no answer at all, counted across passes, not wall time, so
-  // a laptop waking from a long sleep is not taken for a day-long outage.
-  const unreachableSince = yield* Ref.make<string | null>(null);
   const storage = (operation: string) => (cause: unknown) =>
     new IdentityStorageError({ operation, cause });
   const nowIso = DateTime.now.pipe(Effect.map(DateTime.formatIso));
@@ -732,10 +731,14 @@ const make = Effect.gen(function* () {
     const connect = yield* readConnect;
     if (connect === null) return;
     const answeredNow = yield* refreshAll(connect);
-    const since = yield* Ref.updateAndGet(unreachableSince, (current) =>
-      answeredNow ? null : (current ?? now),
-    );
-    const silentForADay = since !== null && addIso(since, CONFIRMATION_LAPSE) <= (yield* nowIso);
+    // Passes with no answer at all, kept across restarts, so a server restarted daily during an
+    // outage still lapses; counted in passes, not wall time, so a long sleep is not an outage.
+    const [counted] = yield* sql<{ readonly unanswered_passes: number }>`
+      UPDATE j5_identity_connect
+      SET unanswered_passes = ${answeredNow ? sql`0` : sql`unanswered_passes + 1`}
+      RETURNING unanswered_passes
+    `.pipe(Effect.mapError(storage("count passes J5 Connect did not answer")));
+    const silentForADay = (counted?.unanswered_passes ?? 0) > PASSES_IN_A_LAPSE;
     if (answeredNow || silentForADay) yield* sweep();
   }).pipe(Effect.withSpan("j5.identity.confirmAll"));
 
@@ -799,7 +802,8 @@ const make = Effect.gen(function* () {
           issuer = excluded.issuer,
           client_id = excluded.client_id,
           return_urls_json = excluded.return_urls_json,
-          joined_at = excluded.joined_at
+          joined_at = excluded.joined_at,
+          unanswered_passes = 0
       `.pipe(Effect.mapError(storage("join J5 Connect")));
       yield* peopleChanged;
       return toConnect(row);

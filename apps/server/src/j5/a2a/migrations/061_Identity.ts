@@ -14,7 +14,8 @@ export default Effect.gen(function* () {
       issuer TEXT NOT NULL,
       client_id TEXT NOT NULL,
       return_urls_json TEXT NOT NULL,
-      joined_at TEXT NOT NULL
+      joined_at TEXT NOT NULL,
+      unanswered_passes INTEGER NOT NULL DEFAULT 0
     )
   `;
 

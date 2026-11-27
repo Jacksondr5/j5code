@@ -639,6 +639,27 @@ it.effect("waking with no network lapses no one; a day of passes with no answer 
   }).pipe(Effect.provide(makeLayer())),
 );
 
+it.effect("a restart in the middle of an outage keeps counting the passes with no answer", () =>
+  Effect.gen(function* () {
+    const connect = yield* FakeConnect.FakeConnect;
+    yield* joined;
+    yield* grantAda;
+    const { sessionId } = yield* pairedBrowser("ada");
+    connect.down = true;
+    yield* passes(12);
+    // The server restarts: a new Identity over the same database.
+    const restarted = Context.get(yield* Layer.build(Identity.layer), Identity.Identity);
+    for (let hour = 0; hour < 12; hour += 1) {
+      yield* TestClock.adjust("1 hour");
+      yield* restarted.confirmAll;
+    }
+    assert.isTrue(yield* isLive(sessionId));
+    yield* TestClock.adjust("1 hour");
+    yield* restarted.confirmAll;
+    assert.isFalse(yield* isLive(sessionId));
+  }).pipe(Effect.scoped, Effect.provide(makeLayer())),
+);
+
 it.effect("leaving clears bindings and requests and ends every sign-in session", () =>
   Effect.gen(function* () {
     const identity = yield* Identity.Identity;
