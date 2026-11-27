@@ -6,6 +6,7 @@ import {
   J5_IDENTITY_CLI_RETURN_URLS_PATH,
   J5_IDENTITY_DESCRIBE_PATH,
   J5_IDENTITY_SIGN_IN_PATH,
+  J5_SIGN_IN_APP_PARAM,
   J5_SIGN_IN_OUTCOME_PARAM,
   JoinConnectRequest,
   JoinedConnectJson,
@@ -78,7 +79,9 @@ export const identityHttpRouteLayer = Layer.unwrap(
         const request = yield* HttpServerRequest.HttpServerRequest;
         const url = requestUrl(request);
         if (Option.isNone(url)) return toPairing("failed");
-        return yield* identity.startSignIn(url.value.origin).pipe(
+        // `app` is the desktop or mobile app's link scheme, when it opened this in a browser.
+        const appScheme = url.value.searchParams.get(J5_SIGN_IN_APP_PARAM);
+        return yield* identity.startSignIn({ origin: url.value.origin, appScheme }).pipe(
           Effect.map((location) => HttpServerResponse.redirect(location, { headers: NO_STORE })),
           Effect.catch((cause) =>
             Effect.logWarning("J5 sign-in could not start", { cause }).pipe(
@@ -102,7 +105,13 @@ export const identityHttpRouteLayer = Layer.unwrap(
           return toPairing("failed");
         }
         return yield* identity.completeSignIn({ state, code, origin: url.value.origin }).pipe(
-          Effect.map((outcome) => toPairing(outcome.kind === "pair" ? outcome : outcome.kind)),
+          Effect.map((outcome) =>
+            outcome.kind !== "pair"
+              ? toPairing(outcome.kind)
+              : outcome.appLink !== null
+                ? HttpServerResponse.redirect(outcome.appLink, { headers: NO_STORE })
+                : toPairing(outcome),
+          ),
           Effect.catch((cause) =>
             Effect.logWarning("J5 sign-in could not finish", { cause }).pipe(
               Effect.as(toPairing("failed")),

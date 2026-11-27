@@ -23,6 +23,7 @@ import {
 } from "../../environments/primary";
 import { describeLink } from "./describeLink";
 import { NAME_NOT_USABLE } from "./shareLink.logic";
+import { SignInPairing } from "./SignInPairing";
 import {
   ALREADY_YOURS,
   asYourselfWords,
@@ -108,7 +109,9 @@ function LinkSurface({
   }, [marked, token]);
 
   if (state === null) return <PairingPendingSurface />;
-  if (state.kind === "upstream" || token === null) return <PairingRouteSurface {...props} />;
+  // With no link at all, a server that trusts a J5 Connect offers sign-in beside the token form.
+  if (token === null) return <SignInPairing {...props} />;
+  if (state.kind === "upstream") return <PairingRouteSurface {...props} />;
   if (state.kind === "dead") return <DeadLink />;
   return (
     <JoinSurface

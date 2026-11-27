@@ -46,6 +46,12 @@ export const J5_IDENTITY_CLI_RETURN_URLS_PATH = "/api/j5/identity/cli/return-url
 export const SignInOutcome = Schema.Literals(["waiting", "not-let-in", "failed"]);
 export type SignInOutcome = typeof SignInOutcome.Type;
 export const J5_SIGN_IN_OUTCOME_PARAM = "j5-sign-in";
+/**
+ * On the sign-in path, the desktop or mobile app's link scheme (`j5code`, `j5code-dev`), when the
+ * app opened it in the system browser: a sign-in that pairs goes back to the app as a
+ * `<scheme>://pair?pairingUrl=…` link, as a scanned pairing link would.
+ */
+export const J5_SIGN_IN_APP_PARAM = "app";
 
 export const IdentityDescription = Schema.Struct({
   /** The J5 Connect's host, to name it on the button; `null` when the server trusts none. */

@@ -272,6 +272,9 @@ export function useOwnedEnvironmentIds(): ReadonlySet<EnvironmentId> {
   return useAtomValue(ownership.ownedEnvironmentIds);
 }
 
+/** The same, for an atom that reads something from each owned server. */
+export const ownedEnvironmentIdsAtom = ownership.ownedEnvironmentIds;
+
 /** Whether the person can write to anything on a connected server, so has an agent to ask. */
 export function useWritesSomewhere(): boolean {
   return useAtomValue(ownership.writesSomewhere);

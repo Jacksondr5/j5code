@@ -12,12 +12,14 @@ import {
   type ThreadHomesRequest,
 } from "@t3tools/contracts/j5";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import { failAsJ5ActionError } from "../rpcActionError.ts";
 import { connectionPersonId } from "../sharing/connectionPerson.ts";
 import { connectionReads, connectionWrites, isOwner } from "../sharing/connectionWriter.ts";
 import { PersonAccess, type SessionIdentity } from "../sharing/PersonAccess.ts";
+import { Identity } from "../identity/Identity.ts";
 import { SharedThreads } from "../sharing/SharedThreads.ts";
 import { ClientReadsService } from "./ClientReadsService.ts";
 import { ParticipantId } from "./contracts.ts";
@@ -71,6 +73,8 @@ export const makeClientReadRpcHandlers = Effect.fn("j5.makeClientReadRpcHandlers
   const changes = yield* ReadChanges;
   const people = yield* PersonAccess;
   const shared = yield* SharedThreads;
+  // Sign-in through J5 Connect is composed with the access gate; a server without it has none.
+  const identity = yield* Effect.serviceOption(Identity);
   // The inbox is the connection's own person's, whatever the client asks.
   const personOf = connectionPersonId(session).pipe(Effect.provideService(PersonAccess, people));
   // A Crew's requests are listed to whoever can write to its Captain's thread (Crews AC23).
@@ -92,6 +96,13 @@ export const makeClientReadRpcHandlers = Effect.fn("j5.makeClientReadRpcHandlers
       .crewWorktreeCleanups(status)
       .pipe(Effect.catch(failed("Reading worktree cleanups failed.")));
   });
+  const accessRequestsWaiting = Effect.gen(function* () {
+    if (Option.isNone(identity)) return 0;
+    if (!(yield* isOwner(session).pipe(Effect.provideService(PersonAccess, people)))) return 0;
+    return (yield* identity.value.state.pipe(
+      Effect.catch(failed("Reading access requests failed.")),
+    )).requests.length;
+  });
   return {
     [METHODS.listHumanInbox]: (input: HumanInboxListRequest) =>
       personOf.pipe(
@@ -110,6 +121,12 @@ export const makeClientReadRpcHandlers = Effect.fn("j5.makeClientReadRpcHandlers
         Effect.flatMap((counted) =>
           cleanupsReached("open").pipe(
             Effect.map((open) => ({ ...counted, count: counted.count + open.length })),
+          ),
+        ),
+        // So does an account waiting to be let in, for an Owner (J5 Connect, decision 4).
+        Effect.flatMap((counted) =>
+          accessRequestsWaiting.pipe(
+            Effect.map((waiting) => ({ ...counted, count: counted.count + waiting })),
           ),
         ),
       ),

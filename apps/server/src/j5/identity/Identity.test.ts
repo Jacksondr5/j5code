@@ -3,6 +3,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import { AuthAccessWriteScope, type AuthSessionId } from "@t3tools/contracts";
 import { LEVEL_PERMISSIONS } from "@t3tools/contracts/j5";
+import { readPairingAppLink, resolveRemotePairingTarget } from "@t3tools/shared/remote";
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -106,11 +107,15 @@ const firstOrigin = Effect.gen(function* () {
 });
 
 /** Starts a sign-in at `origin` and has J5 Connect sign `subject` in; returns its state and code. */
-const startedAs = Effect.fn("test.startedAs")(function* (subject: string, origin?: string) {
+const startedAs = Effect.fn("test.startedAs")(function* (
+  subject: string,
+  origin?: string,
+  appScheme: string | null = null,
+) {
   const identity = yield* Identity.Identity;
   const connect = yield* FakeConnect.FakeConnect;
   const at = origin ?? (yield* firstOrigin);
-  const url = yield* identity.startSignIn(at);
+  const url = yield* identity.startSignIn({ origin: at, appScheme });
   return {
     origin: at,
     state: new URL(url).searchParams.get("state")!,
@@ -378,8 +383,33 @@ it.effect("a sign-in's state is used once, at its own address, and a bad token i
       assert.strictEqual(refused._tag, "OidcError", JSON.stringify(claims));
     }
 
-    const unregistered = yield* Effect.flip(identity.startSignIn("http://198.51.100.7:3773"));
+    const unregistered = yield* Effect.flip(
+      identity.startSignIn({ origin: "http://198.51.100.7:3773", appScheme: null }),
+    );
     assert.strictEqual(unregistered._tag, "AddressNotRegisteredError");
+  }).pipe(Effect.provide(makeLayer())),
+);
+
+it.effect("a sign-in an app started goes back to it as the pairing link it would scan", () =>
+  Effect.gen(function* () {
+    const identity = yield* Identity.Identity;
+    yield* joined;
+    yield* grantAda;
+    const origin = yield* firstOrigin;
+    const outcome = yield* identity.completeSignIn(yield* startedAs("ada", origin, "j5code-dev"));
+    if (outcome.kind !== "pair") return assert.fail(outcome.kind);
+    assert.isTrue(outcome.appLink?.startsWith("j5code-dev://pair?") === true);
+    const pairingUrl = readPairingAppLink(outcome.appLink ?? "");
+    assert.isNotNull(pairingUrl);
+    const target = resolveRemotePairingTarget({ pairingUrl: pairingUrl! });
+    assert.strictEqual(target.credential, outcome.credential);
+    assert.strictEqual(new URL(target.httpBaseUrl).origin, origin);
+    // A browser's own sign-in has no app to go back to.
+    const browser = yield* signIn("ada");
+    assert.isTrue(browser.kind === "pair" && browser.appLink === null);
+
+    const elsewhere = yield* Effect.flip(identity.startSignIn({ origin, appScheme: "https" }));
+    assert.strictEqual(elsewhere._tag, "AppSchemeRefusedError");
   }).pipe(Effect.provide(makeLayer())),
 );
 
@@ -774,7 +804,9 @@ it.effect("leaving clears bindings and requests and ends every sign-in session",
     assert.isNull((yield* identity.describe).signIn);
     // The person stays, with what they reach; only sign-in is gone.
     assert.isNotNull(yield* people.readPerson(adaId));
-    const notJoined = yield* Effect.flip(identity.startSignIn("http://localhost:3773"));
+    const notJoined = yield* Effect.flip(
+      identity.startSignIn({ origin: "http://localhost:3773", appScheme: null }),
+    );
     assert.strictEqual(notJoined._tag, "IdentityNotJoinedError");
   }).pipe(Effect.provide(makeLayer())),
 );

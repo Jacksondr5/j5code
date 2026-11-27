@@ -79,6 +79,7 @@ import {
   widenTargets,
 } from "./people.logic";
 import { IconAction } from "./IconAction";
+import { AccessRequestsSection, SignInSection } from "./IdentitySections";
 import { AccessRowLine, LinkLine, WritingWarning } from "./ShareDialog";
 import { useAccessRows } from "./scopeAccess";
 import { openSharingDialog } from "./sharingDialogs";
@@ -238,6 +239,12 @@ function OwnedServerPeople({
 
   return (
     <SettingsPageContainer width="wide">
+      <AccessRequestsSection
+        environmentId={environmentId}
+        people={everyone}
+        canManage={canManage}
+        nowMs={nowMs}
+      />
       <SettingsSection
         title="People"
         titleAction={
@@ -346,6 +353,8 @@ function OwnedServerPeople({
           </div>
         )}
       </SettingsSection>
+
+      <SignInSection environmentId={environmentId} canManage={canManage} nowMs={nowMs} />
     </SettingsPageContainer>
   );
 }
