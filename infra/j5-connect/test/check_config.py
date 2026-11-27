@@ -1,9 +1,12 @@
+import json
+import os
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from connect import render_config, validate
+from connect import main, render_config, validate
 
 ENV = {
     "J5_CONNECT_ISSUER": "https://connect.example.test",
@@ -33,6 +36,39 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(first, render_config(ENV)["connectors"][0]["id"])
         other = render_config(dict(ENV, J5_CONNECT_UPSTREAM_ISSUER="https://other.example.test"))
         self.assertNotEqual(first, other["connectors"][0]["id"])
+
+    def test_plaintext_upstream_requires_isolated_fixture(self):
+        env = dict(ENV, J5_CONNECT_UPSTREAM_ISSUER="http://upstream.localhost:5557")
+        with self.assertRaisesRegex(ValueError, "must use HTTPS"):
+            render_config(env)
+        env["J5_CONNECT_TEST_PROFILE"] = "true"
+        render_config(env)
+        env["J5_CONNECT_UPSTREAM_ISSUER"] = "http://identity.example.test"
+        with self.assertRaisesRegex(ValueError, "must use HTTPS"):
+            render_config(env)
+
+    def test_rejects_extra_grants(self):
+        config = render_config(ENV)
+        config["oauth2"]["grantTypes"].append("urn:ietf:params:oauth:grant-type:token-exchange")
+        with self.assertRaisesRegex(ValueError, "only authorization_code and refresh_token"):
+            validate(config, "oidc", ENV)
+
+    def test_rejects_unsupported_client_fields_and_example_secret(self):
+        client, = json.loads(ENV["J5_CONNECT_CLIENTS"])
+        for overrides, error in (
+            ({"trustedPeers": ["another-client"]}, "may only set"),
+            ({"secret": "replace-with-a-random-secret"}, "Replace the example"),
+        ):
+            with self.subTest(overrides=overrides), self.assertRaisesRegex(ValueError, error):
+                render_config(dict(ENV, J5_CONNECT_CLIENTS=json.dumps([dict(client, **overrides)])))
+
+    def test_caddy_environment_excludes_credentials(self):
+        paths = {"XDG_DATA_HOME": "/data", "XDG_CONFIG_HOME": "/config"}
+        with patch.dict(os.environ, dict(ENV, **paths)), patch("connect.run_processes") as run:
+            main()
+        commands, = run.call_args.args
+        _, caddy_env = commands[1]
+        self.assertEqual(caddy_env, dict(paths, J5_CONNECT_HOST="connect.example.test"))
 
     def test_rejects_sessions(self):
         with self.assertRaisesRegex(ValueError, "sessions must be disabled"):

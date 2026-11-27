@@ -8,6 +8,7 @@ services:
       J5_CONNECT_ISSUER: https://localhost:${J5_CONNECT_TEST_HTTPS_PORT:-8443}
       J5_CONNECT_PROVIDER: oidc
       J5_CONNECT_OIDC_SCOPES: ""
+      J5_CONNECT_TEST_PROFILE: "true"
       J5_CONNECT_UPSTREAM_ISSUER: http://upstream.localhost:${J5_CONNECT_TEST_UPSTREAM_PORT:-5557}
       J5_CONNECT_UPSTREAM_CLIENT_ID: connect-fixture
       J5_CONNECT_UPSTREAM_CLIENT_SECRET: fixture-upstream-secret

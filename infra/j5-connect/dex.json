@@ -12,6 +12,6 @@
     }
   },
   "web": { "http": "127.0.0.1:5556" },
-  "oauth2": { "skipApprovalScreen": true },
+  "oauth2": { "skipApprovalScreen": true, "grantTypes": ["authorization_code", "refresh_token"] },
   "expiry": { "refreshTokens": { "reuseInterval": "0s" } }
 }
