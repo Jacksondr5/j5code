@@ -1,0 +1,11 @@
+{
+  "type": "oidc",
+  "name": "Company sign-in",
+  "config": {
+    "issuer": "$J5_CONNECT_UPSTREAM_ISSUER",
+    "clientID": "$J5_CONNECT_UPSTREAM_CLIENT_ID",
+    "clientSecret": "$J5_CONNECT_UPSTREAM_CLIENT_SECRET",
+    "redirectURI": "$J5_CONNECT_CALLBACK",
+    "scopes": ["profile", "email", "offline_access"]
+  }
+}

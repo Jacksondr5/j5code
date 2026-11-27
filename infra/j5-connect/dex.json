@@ -1,0 +1,17 @@
+{
+  "issuer": "$J5_CONNECT_ISSUER",
+  "storage": {
+    "type": "postgres",
+    "config": {
+      "host": "postgres",
+      "port": 5432,
+      "database": "connect",
+      "user": "connect",
+      "password": "$POSTGRES_PASSWORD",
+      "ssl": { "mode": "disable" }
+    }
+  },
+  "web": { "http": "127.0.0.1:5556" },
+  "oauth2": { "skipApprovalScreen": true },
+  "expiry": { "refreshTokens": { "reuseInterval": "0s" } }
+}
