@@ -12,6 +12,7 @@ import * as DateTime from "effect/DateTime";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import * as Etag from "effect/http/Etag";
 import * as HttpPlatform from "effect/http/HttpPlatform";
 import * as HttpRouter from "effect/http/HttpRouter";
@@ -38,12 +39,15 @@ class AuthTestApi extends HttpApi.make("environment").add(EnvironmentHttpApi.gro
 const services = gateEnvironmentAuth(
   EnvironmentAuth.layer.pipe(
     Layer.provideMerge(peopleLayer),
-    Layer.provide(ServerSecretStore.layer),
+    Layer.provideMerge(ServerSecretStore.layer),
     Layer.provide(ServerEnvironment.layerIdentity),
     Layer.provide(ManagedPolicy.layerTest()),
     Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-key-renewal-http-" })),
   ),
-).pipe(Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)));
+).pipe(
+  // Sign-in through J5 Connect is composed with the gate; these tests make no requests with it.
+  Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, FetchHttpClient.layer)),
+);
 
 const routes = HttpApiBuilder.layer(AuthTestApi).pipe(
   Layer.provide(AuthHttp.layer),

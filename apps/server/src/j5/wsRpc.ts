@@ -30,6 +30,8 @@ import { PeerAdminService } from "./a2a/PeerAdminService.ts";
 import { ReadChanges } from "./a2a/ReadChanges.ts";
 import { makeAgentPersonaRpcHandlers } from "./agents/agentPersonaRpc.ts";
 import { ArtifactDeletion } from "./artifacts/ArtifactDeletion.ts";
+import { Identity } from "./identity/Identity.ts";
+import { makeIdentityRpcHandlers } from "./identity/identityRpc.ts";
 import { makeArtifactRpcHandlers } from "./artifacts/artifactRpc.ts";
 import type { ArtifactWorkspace } from "./artifacts/ArtifactWorkspace.ts";
 import { PlaybookStore } from "./playbooks/PlaybookStore.ts";
@@ -75,6 +77,7 @@ type J5WsRpcServices =
   | People
   | Links
   | Access
+  | Identity
   | SharedConversation
   | SharedThreads;
 
@@ -96,6 +99,7 @@ export const j5WsRpcServices = Effect.context<J5WsRpcServices>().pipe(
       People,
       Links,
       Access,
+      Identity,
       SharedConversation,
       SharedThreads,
     ),
@@ -145,6 +149,7 @@ export const layerJ5WsRpc = (
           session,
         })),
         ...makePeopleRpcHandlers({ people: yield* People, links: yield* Links, session }),
+        ...makeIdentityRpcHandlers(yield* Identity),
         ...makeSharedConversationRpcHandlers({
           conversation: yield* SharedConversation,
           people: yield* PersonAccess,

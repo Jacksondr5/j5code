@@ -3,6 +3,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as FetchHttpClient from "effect/http/FetchHttpClient";
 
 import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
 import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
@@ -26,7 +27,7 @@ const layer = gateEnvironmentAuth(
     Layer.provideMerge(recordsLayer),
     Layer.provideMerge(humanPersonRegistryLayer),
     Layer.provideMerge(SqlitePersistence.layerMemory),
-    Layer.provide(ServerSecretStore.layer),
+    Layer.provideMerge(ServerSecretStore.layer),
     Layer.provide(ServerEnvironment.layerIdentity),
     Layer.provide(ManagedPolicy.layerTest()),
     Layer.provideMerge(
@@ -39,7 +40,10 @@ const layer = gateEnvironmentAuth(
       ).pipe(Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "j5-first-owner-" }))),
     ),
   ),
-).pipe(Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)));
+).pipe(
+  // Sign-in through J5 Connect is composed with the gate; these tests make no requests with it.
+  Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, FetchHttpClient.layer)),
+);
 
 const requestMetadata = { deviceType: "desktop" as const, os: "Linux", browser: "Chrome" };
 

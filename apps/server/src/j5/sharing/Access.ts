@@ -131,6 +131,12 @@ export interface AccessShape {
    * goes (AC49). Their record stays for the messages they wrote.
    */
   readonly removePerson: (personId: ParticipantId) => Effect.Effect<void, ChangeError>;
+  /**
+   * Ends the MCP clients a person approved, and voids approvals still waiting if they are an
+   * Owner, as removing them would, while leaving them on the server. For a J5 Connect account
+   * that lapsed: a disabled account counts as a removed Owner for its MCP clients.
+   */
+  readonly endMcpApprovals: (personId: ParticipantId) => Effect.Effect<void, ChangeError>;
   /** A person's new name, told to whatever follows it, such as a shared conversation's note. */
   readonly rename: (input: {
     readonly personId: ParticipantId;
@@ -493,6 +499,15 @@ const make = Effect.gen(function* () {
         }),
       );
       yield* tell({ personId, kind: "removed" });
+    }),
+
+    endMcpApprovals: Effect.fn("j5.sharing.access.endMcpApprovals")(function* (personId) {
+      yield* committedRenewing(({ end }) =>
+        Effect.gen(function* () {
+          if (snapshotOf(yield* people.listLevels(personId)).owner) yield* voidWaitingMcpApprovals;
+          yield* endApprovedMcpClients(personId, end);
+        }),
+      );
     }),
 
     rename: Effect.fn("j5.sharing.access.rename")(function* (input) {

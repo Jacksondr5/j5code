@@ -103,6 +103,8 @@ export interface PairingIntent {
   readonly personId: ParticipantId;
   /** The J5 link it was minted for, when it was. */
   readonly linkId: string | null;
+  /** The J5 Connect account whose sign-in it was minted for, when it was. */
+  readonly signInAccountId: string | null;
   readonly ceiling: ReadonlyArray<string> | null;
 }
 
@@ -126,6 +128,8 @@ export interface PairingIntentsShape {
     readonly credential: string;
     readonly personId: ParticipantId;
     readonly linkId: string | null;
+    /** The J5 Connect account whose sign-in it pairs; absent for every other pairing. */
+    readonly signInAccountId?: string | null;
     readonly ceiling: ReadonlyArray<string> | null;
   }) => Effect.Effect<void, PairingIntentError>;
   /**
@@ -183,6 +187,7 @@ interface IntentRow {
   readonly pairing_link_id: string;
   readonly person_id: string;
   readonly link_id: string | null;
+  readonly sign_in_account_id: string | null;
   readonly ceiling_scopes: string | null;
 }
 
@@ -190,6 +195,7 @@ const toIntent = (row: IntentRow): PairingIntent => ({
   pairingLinkId: row.pairing_link_id,
   personId: ParticipantId.make(row.person_id),
   linkId: row.link_id,
+  signInAccountId: row.sign_in_account_id,
   ceiling:
     row.ceiling_scopes === null
       ? null
@@ -212,10 +218,11 @@ const make: Layer.Layer<PairingIntents, never, SqlClient.SqlClient | ReadChanges
           const ceiling = input.ceiling === null ? null : encodeCeiling(input.ceiling);
           const rows = yield* sql`
           INSERT INTO j5_a2a_pairing_intent (
-            pairing_link_id, credential_hash, person_id, link_id, ceiling_scopes, created_at
+            pairing_link_id, credential_hash, person_id, link_id, sign_in_account_id,
+            ceiling_scopes, created_at
           )
           SELECT ${input.pairingLinkId}, ${hashCredential(input.credential)}, person_id,
-            ${input.linkId}, ${ceiling}, ${createdAt}
+            ${input.linkId}, ${input.signInAccountId ?? null}, ${ceiling}, ${createdAt}
           FROM j5_a2a_human_person
           WHERE person_id = ${input.personId} AND removed_at IS NULL
           RETURNING pairing_link_id
@@ -227,7 +234,8 @@ const make: Layer.Layer<PairingIntents, never, SqlClient.SqlClient | ReadChanges
 
       const intentOf: PairingIntentsShape["intentOf"] = (credential) =>
         sql<IntentRow>`
-        SELECT pairing_link_id, person_id, link_id, ceiling_scopes FROM j5_a2a_pairing_intent
+        SELECT pairing_link_id, person_id, link_id, sign_in_account_id, ceiling_scopes
+        FROM j5_a2a_pairing_intent
         WHERE credential_hash = ${hashCredential(credential)}
       `.pipe(
           Effect.map((rows) => (rows[0] === undefined ? null : toIntent(rows[0]))),
@@ -354,10 +362,10 @@ const make: Layer.Layer<PairingIntents, never, SqlClient.SqlClient | ReadChanges
                 const boundAt = DateTime.formatIso(yield* DateTime.now);
                 yield* sql`
                   INSERT INTO j5_a2a_person_session (
-                    session_id, person_id, bound_at, ceiling_scopes
+                    session_id, person_id, bound_at, ceiling_scopes, sign_in_account_id
                   ) VALUES (
                     ${session.sessionId}, ${intent.personId}, ${boundAt},
-                    ${ceiling === null ? null : encodeCeiling(ceiling)}
+                    ${ceiling === null ? null : encodeCeiling(ceiling)}, ${intent.signInAccountId}
                   )
                 `;
                 yield* sql`

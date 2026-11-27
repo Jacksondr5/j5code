@@ -2,6 +2,7 @@ import { CLIENT_ACTION_RPC_SCOPES } from "./a2a/clientActionRpc.ts";
 import { CLIENT_READ_RPC_SCOPES } from "./a2a/clientReadRpc.ts";
 import { AGENT_PERSONA_RPC_SCOPES } from "./agents/agentPersonaRpc.ts";
 import { ARTIFACT_RPC_SCOPES } from "./artifacts/artifactRpc.ts";
+import { IDENTITY_RPC_SCOPES } from "./identity/identityRpc.ts";
 import { PLAYBOOK_RPC_SCOPES } from "./playbooks/playbookRpc.ts";
 import { ACCESS_RPC_SCOPES } from "./sharing/accessRpc.ts";
 import { PEOPLE_RPC_SCOPES } from "./sharing/peopleRpc.ts";
@@ -23,6 +24,7 @@ export const J5_RPC_SCOPES = {
   ...CLIENT_ACTION_RPC_SCOPES,
   ...ACCESS_RPC_SCOPES,
   ...PEOPLE_RPC_SCOPES,
+  ...IDENTITY_RPC_SCOPES,
   ...SHARED_CONVERSATION_RPC_SCOPES,
   ...CLIENT_READ_RPC_SCOPES,
 } as const;

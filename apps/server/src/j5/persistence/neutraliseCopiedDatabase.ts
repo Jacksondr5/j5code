@@ -34,6 +34,12 @@ export interface NeutralisedJ5State {
   readonly playbookRuns: number;
   /** Playbook steps a Crew seat has not taken yet. Skipped. */
   readonly playbookStepDeliveries: number;
+  /**
+   * The J5 Connect trusted, and its accounts with their refresh tokens, which the hourly
+   * confirmation would spend: J5 Connect rotates them, which would lapse the real server's.
+   * Deleted, so the copy trusts no J5 Connect.
+   */
+  readonly signInAccounts: number;
 }
 
 const REASON = "Stood down in a development copy of this database.";
@@ -132,7 +138,14 @@ export const neutraliseJ5State = Effect.fn("j5.neutraliseJ5State")(function* () 
           RETURNING run_id`,
       );
 
+      yield* count("j5_identity_connect", sql`DELETE FROM j5_identity_connect RETURNING issuer`);
+      const signInAccounts = yield* count(
+        "j5_identity_account",
+        sql`DELETE FROM j5_identity_account RETURNING account_id`,
+      );
+
       return {
+        signInAccounts,
         peers,
         peerStoreGrants,
         a2aSessions,

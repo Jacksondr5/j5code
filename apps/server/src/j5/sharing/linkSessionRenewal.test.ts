@@ -6,6 +6,7 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as TestClock from "effect/testing/TestClock";
@@ -29,12 +30,15 @@ import { peopleLayer, person } from "./test-support/accessHarness.ts";
 const layer = gateEnvironmentAuth(
   EnvironmentAuth.layer.pipe(
     Layer.provideMerge(peopleLayer),
-    Layer.provide(ServerSecretStore.layer),
+    Layer.provideMerge(ServerSecretStore.layer),
     Layer.provide(ServerEnvironment.layerIdentity),
     Layer.provide(ManagedPolicy.layerTest()),
     Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-link-session-" })),
   ),
-).pipe(Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)));
+).pipe(
+  // Sign-in through J5 Connect is composed with the gate; these tests make no requests with it.
+  Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, FetchHttpClient.layer)),
+);
 
 const requestMetadata = { deviceType: "mobile" as const, os: "iOS", browser: "Safari" };
 const ownerDesktop = { sessionId: "session:owner-desktop" as never, subject: "desktop-bootstrap" };

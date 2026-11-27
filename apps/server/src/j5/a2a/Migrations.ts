@@ -62,6 +62,7 @@ import Migration0057 from "./migrations/057_ParticipantMoved.ts";
 import Migration0058 from "./migrations/058_PeerLines.ts";
 import Migration0059 from "./migrations/059_LinkSessions.ts";
 import Migration0060 from "./migrations/060_PeerRoutes.ts";
+import Migration0061 from "./migrations/061_Identity.ts";
 
 export const J5_A2A_MIGRATIONS_TABLE = "j5_a2a_migrations";
 
@@ -133,6 +134,7 @@ export const migrationEntries = [
   [58, "PeerLines", Migration0058],
   [59, "LinkSessions", Migration0059],
   [60, "PeerRoutes", Migration0060],
+  [61, "Identity", Migration0061],
 ] as const;
 
 const makeMigrationLoader = (throughId?: number) =>

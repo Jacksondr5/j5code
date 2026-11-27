@@ -39,6 +39,7 @@ import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
 import type * as PairingGrantStore from "../../auth/PairingGrantStore.ts";
 import * as SessionStore from "../../auth/SessionStore.ts";
 import { AuthSessionRepository } from "../../persistence/AuthSessions.ts";
+import * as Identity from "../identity/Identity.ts";
 import {
   Access,
   layer as accessLayer,
@@ -809,6 +810,8 @@ export const gateEnvironmentAuth = <A, E, R>(
   >,
 ) =>
   peopleLayer.pipe(
+    // Sign-in through J5 Connect, with its hourly confirmation; it revokes through the gate.
+    Layer.provideMerge(Identity.confirmationLayer.pipe(Layer.provideMerge(Identity.layer))),
     Layer.provideMerge(linksLayer),
     Layer.provideMerge(renewOutdatedDevicesAtStartup),
     Layer.provideMerge(nameDevOwnerAtStartup),

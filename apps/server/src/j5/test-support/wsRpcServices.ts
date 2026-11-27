@@ -8,6 +8,7 @@ import { EnvironmentLinkService } from "../a2a/EnvironmentLinkService.ts";
 import { PeerAdminService } from "../a2a/PeerAdminService.ts";
 import { ReadChanges } from "../a2a/ReadChanges.ts";
 import { ArtifactDeletion } from "../artifacts/ArtifactDeletion.ts";
+import { Identity } from "../identity/Identity.ts";
 import { PlaybookStore } from "../playbooks/PlaybookStore.ts";
 import { Access } from "../sharing/Access.ts";
 import { Links } from "../sharing/Links.ts";
@@ -39,5 +40,6 @@ export const layerJ5WsRouteServices = Layer.mergeAll(
   Layer.mock(People)({}),
   Layer.mock(Links)({}),
   Layer.mock(Access)({}),
+  Layer.mock(Identity)({}),
   Layer.mock(SharedThreads)({}),
 );
