@@ -9,6 +9,7 @@ import type {
   PersonScope,
 } from "@t3tools/contracts/j5";
 import * as DateTime from "effect/DateTime";
+import * as Option from "effect/Option";
 import { useState } from "react";
 
 import { ITEM_ROW_CLASSNAME } from "../../components/settings/itemRows";
@@ -26,12 +27,9 @@ import { toastManager } from "../../components/ui/toast";
 import { requestConfirmDialog } from "../../confirmDialog";
 import { useNowMinute } from "../../hooks/useNowMinute";
 import { useProjects } from "../../state/entities";
-import {
-  useEnvironment,
-  useEnvironmentHttpBaseUrl,
-  usePrimaryEnvironmentId,
-} from "../../state/environments";
+import { useEnvironment, usePrimaryEnvironmentId } from "../../state/environments";
 import { useEnvironmentQuery } from "../../state/query";
+import { usePreparedConnection } from "../../state/session";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { identityManage, identityQuery, refreshIdentity } from "./identityManage";
@@ -391,11 +389,13 @@ function JoinForm({ environmentId }: { readonly environmentId: EnvironmentId }) 
   const join = useAtomCommand(identityManage.join, { reportFailure: false });
   const canJoin = useAtomValue(identityManage.join.permissionAtom(environmentId));
   const primaryEnvironmentId = usePrimaryEnvironmentId();
-  const reachedAt = useEnvironmentHttpBaseUrl(environmentId);
+  const prepared = usePreparedConnection(environmentId);
   const addresses = joinAddresses({
     servesPage: environmentId === primaryEnvironmentId,
     pageHref: window.location.href,
-    reachedAt,
+    reachedAt: Option.isSome(prepared)
+      ? { route: prepared.value.target._tag, httpBaseUrl: prepared.value.httpBaseUrl }
+      : null,
   });
   const redirects = useEnvironmentQuery(
     identityManage.returnUrls({ environmentId, input: { addresses } }),

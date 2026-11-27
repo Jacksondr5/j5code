@@ -5,6 +5,7 @@ import {
   PairingPendingSurface,
 } from "../components/auth/PairingRouteSurface";
 import { JoinLinkPairingSurface } from "../j5/sharing/JoinLinkPairingSurface";
+import { AppSignInRetry, isAppSignInRetry } from "../j5/sharing/SignInPairing";
 
 export const Route = createFileRoute("/pair")({
   beforeLoad: async ({ context }) => {
@@ -14,6 +15,9 @@ export const Route = createFileRoute("/pair")({
         authGateState,
       };
     }
+    // J5: an app's sign-in comes back here to retry, in a paired browser too (FORK.md case 73).
+    if (isAppSignInRetry(window.location.href))
+      return { authGateState: null, appSignInRetry: true };
 
     if (
       authGateState.status === "authenticated" ||
@@ -32,7 +36,8 @@ export const Route = createFileRoute("/pair")({
 
 function PairRouteView() {
   const router = useRouter();
-  const { authGateState } = Route.useRouteContext();
+  const { authGateState, appSignInRetry } = Route.useRouteContext();
+  if (appSignInRetry === true) return <AppSignInRetry />;
 
   if (!authGateState) {
     return null;

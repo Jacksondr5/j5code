@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  appSignInRetryOf,
   desktopAppScheme,
   joinAddresses,
   serverBaseFromHost,
@@ -39,7 +40,7 @@ describe("sign-in on the pairing page", () => {
 describe("the address a joining server is offered at", () => {
   it("is the page's own only for the server serving the page", () => {
     const page = "https://j5.example.test/settings/people";
-    const other = "http://192.0.2.4:3773/";
+    const other = { route: "BearerConnectionTarget", httpBaseUrl: "http://192.0.2.4:3773/" };
     expect(joinAddresses({ servesPage: true, pageHref: page, reachedAt: other })).toEqual([
       "https://j5.example.test",
     ]);
@@ -47,6 +48,11 @@ describe("the address a joining server is offered at", () => {
       "http://192.0.2.4:3773",
     ]);
     expect(joinAddresses({ servesPage: false, pageHref: page, reachedAt: null })).toEqual([]);
+    // An SSH tunnel's loopback port changes with each tunnel, and a relay's address isn't the server's.
+    for (const route of ["SshConnectionTarget", "RelayConnectionTarget"]) {
+      const tunnel = { route, httpBaseUrl: "http://127.0.0.1:41234/" };
+      expect(joinAddresses({ servesPage: false, pageHref: page, reachedAt: tunnel })).toEqual([]);
+    }
     expect(
       joinAddresses({ servesPage: true, pageHref: "j5code://app/settings", reachedAt: null }),
     ).toEqual([]);
@@ -70,6 +76,21 @@ describe("sign-in from the desktop app", () => {
       null,
     );
     expect(signInAppOf("https://j5.example.test/pair?j5-sign-in=waiting")).toBeNull();
+  });
+
+  it("shows an app's retry only for an outcome and an allowed app together", () => {
+    expect(appSignInRetryOf("https://j5.example.test/pair?j5-sign-in=waiting&app=j5code")).toEqual({
+      outcome: "waiting",
+      app: "j5code",
+    });
+    expect(
+      appSignInRetryOf("https://j5.example.test/pair?j5-sign-in=not-let-in&app=j5code-preview"),
+    ).toEqual({ outcome: "not-let-in", app: "j5code-preview" });
+    expect(appSignInRetryOf("https://j5.example.test/pair?j5-sign-in=waiting")).toBeNull();
+    expect(appSignInRetryOf("https://j5.example.test/pair?app=j5code")).toBeNull();
+    expect(
+      appSignInRetryOf("https://j5.example.test/pair?j5-sign-in=waiting&app=j5code-evil"),
+    ).toBeNull();
   });
 
   it("turns a typed host into a server address", () => {

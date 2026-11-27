@@ -83,21 +83,36 @@ const httpOrigin = (address: string): string | null => {
   }
 };
 
+/** Routes whose address is the server's own; an SSH tunnel's or a relay's is not. */
+const DIRECT_ROUTES = new Set(["PrimaryConnectionTarget", "BearerConnectionTarget"]);
+
 /**
  * The address a server joining J5 Connect is offered as one people reach it at: the page's own
- * when that server serves the page, otherwise the address this client reaches it at, if any.
+ * when that server serves the page, otherwise the address this client reaches it at directly.
  */
 export function joinAddresses(input: {
   readonly servesPage: boolean;
   readonly pageHref: string;
-  readonly reachedAt: string | null;
+  readonly reachedAt: { readonly route: string; readonly httpBaseUrl: string } | null;
 }): ReadonlyArray<string> {
   const address = input.servesPage
     ? httpOrigin(input.pageHref)
-    : input.reachedAt === null
+    : input.reachedAt === null || !DIRECT_ROUTES.has(input.reachedAt.route)
       ? null
-      : httpOrigin(input.reachedAt);
+      : httpOrigin(input.reachedAt.httpBaseUrl);
   return address === null ? [] : [address];
+}
+
+/**
+ * A sign-in an app started that came back without pairing, from the pairing page's address. A
+ * browser already paired here still shows it, so the next try can go back to the app.
+ */
+export function appSignInRetryOf(
+  href: string,
+): { readonly outcome: SignInOutcome; readonly app: J5AppLinkScheme } | null {
+  const outcome = signInOutcomeOf(href);
+  const app = signInAppOf(href);
+  return outcome === null || app === null ? null : { outcome, app };
 }
 
 export const SIGN_IN_OUTCOME_WORDS: Record<

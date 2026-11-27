@@ -1,6 +1,6 @@
-import { J5_IDENTITY_DESCRIBE_PATH } from "@t3tools/contracts/j5";
+import { J5_IDENTITY_DESCRIBE_PATH, type J5AppLinkScheme } from "@t3tools/contracts/j5";
 import { LogInIcon } from "lucide-react";
-import { type ComponentProps, useEffect, useState } from "react";
+import { type ComponentProps, type ReactNode, useEffect, useState } from "react";
 
 import {
   PairingPendingSurface,
@@ -12,6 +12,7 @@ import { resolvePrimaryEnvironmentHttpUrl } from "../../environments/primary";
 import { DESCRIBE_TIMEOUT_MS } from "./joinPage.logic";
 import {
   SIGN_IN_OUTCOME_WORDS,
+  appSignInRetryOf,
   signInAppOf,
   signInHost,
   signInOutcomeOf,
@@ -30,18 +31,9 @@ async function describeSignIn(): Promise<string | null> {
   }
 }
 
-/**
- * The pairing page with no link in it, on a server that trusts a J5 Connect: sign in, or pair with
- * a token as before. After a sign-in that did not pair, says why. A server that trusts none gets
- * upstream's page alone.
- */
-export function SignInPairing(props: ComponentProps<typeof PairingRouteSurface>) {
+/** The J5 Connect host the server signs in through; `undefined` until it answers. */
+function useSignInHost() {
   const [host, setHost] = useState<string | null | undefined>(undefined);
-  const [outcome] = useState(() => signInOutcomeOf(window.location.href));
-  // A sign-in the desktop or mobile app started keeps going back to that app on each try.
-  const [app] = useState(() => signInAppOf(window.location.href));
-  const [withToken, setWithToken] = useState(false);
-
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- asks the server once whether it offers sign-in.
   useEffect(() => {
     let cancelled = false;
@@ -52,24 +44,20 @@ export function SignInPairing(props: ComponentProps<typeof PairingRouteSurface>)
       cancelled = true;
     };
   }, []);
+  return host;
+}
 
-  if (host === undefined) return <PairingPendingSurface />;
-  if (host === null) return <PairingRouteSurface {...props} />;
-  if (withToken) {
-    // Upstream's form takes the whole page; the way back to sign-in sits beneath it.
-    return (
-      <>
-        <PairingRouteSurface {...props} />
-        <div className="fixed inset-x-0 bottom-6 flex justify-center">
-          <Button size="sm" variant="outline" onClick={() => setWithToken(false)}>
-            <LogInIcon />
-            Sign in with {host} instead
-          </Button>
-        </div>
-      </>
-    );
-  }
-
+/** Signing in, or what the last try came back with; a sign-in an app started goes back to it. */
+function SignInCard({
+  host,
+  app,
+  children,
+}: {
+  readonly host: string | null;
+  readonly app: J5AppLinkScheme | null;
+  readonly children?: ReactNode;
+}) {
+  const [outcome] = useState(() => signInOutcomeOf(window.location.href));
   const words = outcome === null ? null : SIGN_IN_OUTCOME_WORDS[outcome];
   return (
     <StandalonePage>
@@ -82,23 +70,73 @@ export function SignInPairing(props: ComponentProps<typeof PairingRouteSurface>)
       />
       {app === null ? null : (
         <p className="mt-3 text-sm text-muted-foreground">
-          You started this from the J5 Code app. Signing in again here takes you back to it.
+          {host === null
+            ? "You started this from the J5 Code app. Go back to it."
+            : "You started this from the J5 Code app. Signing in again here takes you back to it."}
         </p>
       )}
       <div className="mt-6 flex flex-wrap gap-2">
-        <Button
-          size="sm"
-          render={<a href={signInUrl(resolvePrimaryEnvironmentHttpUrl("/"), app)} />}
-        >
-          <LogInIcon />
-          {outcome === null ? `Sign in with ${host}` : `Sign in again with ${host}`}
-        </Button>
-        {app === null ? (
-          <Button size="sm" variant="outline" onClick={() => setWithToken(true)}>
-            Use a pairing token
+        {host === null ? null : (
+          <Button
+            size="sm"
+            render={<a href={signInUrl(resolvePrimaryEnvironmentHttpUrl("/"), app)} />}
+          >
+            <LogInIcon />
+            {outcome === null ? `Sign in with ${host}` : `Sign in again with ${host}`}
           </Button>
-        ) : null}
+        )}
+        {children}
       </div>
     </StandalonePage>
   );
+}
+
+/**
+ * The pairing page with no link in it, on a server that trusts a J5 Connect: sign in, or pair with
+ * a token as before. After a sign-in that did not pair, says why. A server that trusts none gets
+ * upstream's page alone.
+ */
+export function SignInPairing(props: ComponentProps<typeof PairingRouteSurface>) {
+  const host = useSignInHost();
+  const [app] = useState(() => signInAppOf(window.location.href));
+  const [withToken, setWithToken] = useState(false);
+
+  if (host === undefined) return <PairingPendingSurface />;
+  if (host === null) return <PairingRouteSurface {...props} />;
+  if (withToken) {
+    // Upstream's card scrolls in its own space, with the way back to sign-in below it.
+    return (
+      <div className="flex h-full flex-col bg-background">
+        <div className="min-h-0 flex-1">
+          <PairingRouteSurface {...props} />
+        </div>
+        <div className="flex justify-center px-4 pb-6">
+          <Button size="sm" variant="outline" onClick={() => setWithToken(false)}>
+            <LogInIcon />
+            Sign in with {host} instead
+          </Button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <SignInCard host={host} app={app}>
+      {app === null ? (
+        <Button size="sm" variant="outline" onClick={() => setWithToken(true)}>
+          Use a pairing token
+        </Button>
+      ) : null}
+    </SignInCard>
+  );
+}
+
+/** Whether `/pair` is an app's sign-in coming back, shown even to a browser paired here. */
+export const isAppSignInRetry = (href: string) => appSignInRetryOf(href) !== null;
+
+/** An app's sign-in that came back without pairing, in a browser that may be paired already. */
+export function AppSignInRetry() {
+  const host = useSignInHost();
+  const [retry] = useState(() => appSignInRetryOf(window.location.href));
+  if (host === undefined) return <PairingPendingSurface />;
+  return <SignInCard host={host} app={retry?.app ?? null} />;
 }
