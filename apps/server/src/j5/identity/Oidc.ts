@@ -68,6 +68,17 @@ const TokenResponse = Schema.Struct({
 });
 
 const OAuthErrorBody = Schema.Struct({ error: Schema.String });
+/** The token endpoint's error codes (RFC 6749 §5.2, plus the two server-side ones). */
+const OAUTH_ERROR_CODES = new Set([
+  "invalid_request",
+  "invalid_client",
+  "invalid_grant",
+  "unauthorized_client",
+  "unsupported_grant_type",
+  "invalid_scope",
+  "server_error",
+  "temporarily_unavailable",
+]);
 
 const Jwk = Schema.Struct({
   kty: Schema.String,
@@ -89,7 +100,7 @@ const IdTokenClaims = Schema.Struct({
   sub: Schema.String,
   aud: Schema.Union([Schema.String, Schema.Array(Schema.String)]),
   exp: Schema.Number,
-  iat: Schema.optional(Schema.Number),
+  iat: Schema.Number,
   nbf: Schema.optional(Schema.Number),
   azp: Schema.optional(Schema.String),
   nonce: Schema.optional(Schema.String),
@@ -246,11 +257,13 @@ const postToken = Effect.fn("j5.identity.oidc.postToken")(function* (
     ),
   );
   if (status !== 200) {
+    // Only the HTTP status and an OAuth error code it recognizes; the raw answer stays in `cause`.
     const said = Option.match(decodeOAuthError(body), {
       onNone: () => String(status),
-      onSome: (error) => `${String(status)} ${error.error}`,
+      onSome: (error) =>
+        OAUTH_ERROR_CODES.has(error.error) ? `${String(status)} ${error.error}` : String(status),
     });
-    return yield* new OidcError({ stage, status: said });
+    return yield* new OidcError({ stage, status: said, cause: body });
   }
   return yield* decodeToken(body).pipe(
     Effect.mapError((cause) => new OidcError({ stage, status: "unreadable", cause })),
@@ -297,7 +310,8 @@ const verifyIdToken = Effect.fn("j5.identity.oidc.verifyIdToken")(function* (inp
     "id_token",
     HttpClientRequest.get(input.discovery.jwks_uri).pipe(HttpClientRequest.acceptJson),
   );
-  if (fetched.status !== 200) return yield* refused(`keys ${String(fetched.status)}`);
+  // Status first, so a server error here counts as no answer (`answered`).
+  if (fetched.status !== 200) return yield* refused(`${String(fetched.status)} keys`);
   const keys = yield* decodeJwks(fetched.body).pipe(Effect.mapError(() => refused("keys")));
   const key = keys.keys.find(
     (candidate) =>
@@ -341,7 +355,7 @@ const verifyIdToken = Effect.fn("j5.identity.oidc.verifyIdToken")(function* (inp
   if (claims.nbf !== undefined && claims.nbf - CLOCK_SKEW_SECONDS > nowSeconds) {
     return yield* refused("not yet valid");
   }
-  if (claims.iat !== undefined && claims.iat - CLOCK_SKEW_SECONDS > nowSeconds) {
+  if (claims.iat - CLOCK_SKEW_SECONDS > nowSeconds) {
     return yield* refused("issued in the future");
   }
   if (input.nonce !== null && claims.nonce !== input.nonce) return yield* refused("nonce");
@@ -454,10 +468,13 @@ export const secretAccepted = Effect.fn("j5.identity.oidc.secretAccepted")(funct
   }).pipe(
     Effect.as(true),
     Effect.catchTags({
+      // Only a client error about the made-up code says the secret was taken: Dex answers an
+      // outage with a 500 `invalid_request` too.
       OidcError: (error) =>
         error.status !== undefined && /\binvalid_client\b|^401\b/.test(error.status)
           ? Effect.succeed(false)
-          : error.status !== undefined && /\binvalid_grant\b|\binvalid_request\b/.test(error.status)
+          : error.status !== undefined &&
+              /^4\d\d (invalid_grant|invalid_request)$/.test(error.status)
             ? Effect.succeed(true)
             : Effect.fail(new OidcError({ stage: "probe", status: error.status, cause: error })),
     }),

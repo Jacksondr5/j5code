@@ -19,6 +19,9 @@ import * as HttpClientResponse from "effect/http/HttpClientResponse";
 
 export const ISSUER = "https://connect.example.test";
 export const CLIENT_ID = "j5-test-server";
+/** A second client registered for the same server, with the same secret and return addresses. */
+export const OTHER_CLIENT_ID = "j5-test-server-renamed";
+const CLIENT_IDS = new Set([CLIENT_ID, OTHER_CLIENT_ID]);
 export const CLIENT_SECRET = "invented-client-secret";
 
 interface User {
@@ -138,6 +141,7 @@ const make = Effect.promise(async () => {
       sub: subject,
       aud: CLIENT_ID,
       exp: 9_999_999_999,
+      iat: 0,
       email: user.email,
       email_verified: user.emailVerified ?? true,
       name: user.name,
@@ -179,13 +183,17 @@ const make = Effect.promise(async () => {
       .toString("utf8")
       .split(":")
       .map(decodeURIComponent);
-    if (basic[0] !== CLIENT_ID || basic[1] !== CLIENT_SECRET) {
+    if (!CLIENT_IDS.has(basic[0] ?? "") || basic[1] !== CLIENT_SECRET) {
       return json({ error: "invalid_client" }, 401);
     }
     if (fake.outage) return json({ error: "invalid_request" }, 500);
     if (body.get("grant_type") === "authorization_code") {
       const code = codes.get(body.get("code") ?? "");
       if (code === undefined) return json({ error: "invalid_grant" }, 400);
+      // A disabled account cannot sign in at all, as at a real identity provider.
+      if (fake.users.get(code.subject)?.active !== true) {
+        return json({ error: "access_denied" }, 403);
+      }
       codes.delete(body.get("code") ?? "");
       const verifier = body.get("code_verifier") ?? "";
       const challenge = NodeCrypto.createHash("sha256").update(verifier).digest("base64url");
@@ -242,7 +250,7 @@ const make = Effect.promise(async () => {
     }
     if (method === "GET" && url.pathname === "/auth/local") {
       const known =
-        url.searchParams.get("client_id") === CLIENT_ID &&
+        CLIENT_IDS.has(url.searchParams.get("client_id") ?? "") &&
         fake.returnUrls.has(url.searchParams.get("redirect_uri") ?? "");
       return known
         ? new Response("<form>sign in</form>", { status: 200 })
